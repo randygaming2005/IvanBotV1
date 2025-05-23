@@ -33,7 +33,8 @@ timezone = pytz.timezone("Asia/Jakarta")
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Halo! Gunakan /set jam:menit (contoh: /set 08:30 12:45) untuk pengingat harian.\n"
-        "/list untuk cek pengingat, /stop untuk hapus semua, /test untuk uji pengingat 1 menit."
+        "/list untuk cek pengingat, /stop untuk hapus semua, /test untuk uji pengingat 1 menit.\n"
+        "/waktu untuk cek waktu server saat ini."
     )
 
 async def reminder(context: ContextTypes.DEFAULT_TYPE):
@@ -124,6 +125,10 @@ async def test_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Gagal menjadwalkan pengingat.")
         logging.error(f"Error scheduling test reminder: {e}")
 
+async def waktu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.datetime.now()
+    await update.message.reply_text(f"Waktu server sekarang:\n{now.strftime('%Y-%m-%d %H:%M:%S')} (naive, tanpa timezone info)")
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logging.error("❗ Exception occurred:", exc_info=context.error)
     if isinstance(update, Update) and update.effective_chat:
@@ -159,6 +164,7 @@ async def main():
     application.add_handler(CommandHandler("list", list_times))
     application.add_handler(CommandHandler("stop", stop))
     application.add_handler(CommandHandler("test", test_reminder))
+    application.add_handler(CommandHandler("waktu", waktu))  # Tambahan command waktu
     application.add_error_handler(error_handler)
 
     # Setup aiohttp webserver dengan webhook dan healthcheck
