@@ -2,7 +2,6 @@ import logging
 import datetime
 import pytz
 import os
-import asyncio
 from aiohttp import web
 from telegram import Update
 from telegram.ext import (
@@ -18,7 +17,13 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-TOKEN = "8166249822:AAFcdKH1fEoEMkEGTmfuw71NbvwMmh4rGaI"  # Ganti dengan token kamu
+# Get token and render domain from environment
+TOKEN = os.environ.get("BOT_TOKEN")
+RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
+
+if not TOKEN or not RENDER_EXTERNAL_URL:
+    raise RuntimeError("❌ BOT_TOKEN atau RENDER_EXTERNAL_URL belum diset di environment!")
+
 persistence = PicklePersistence(filepath="reminder_data.pkl")
 user_jobs = {}
 timezone = pytz.timezone("Asia/Jakarta")
@@ -124,21 +129,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# --- AIOHTTP Web Server for Healthcheck ---
-
-async def handle(request):
-    return web.Response(text="Bot is running")
-
-async def start_webserver():
-    app = web.Application()
-    app.add_routes([web.get('/', handle)])
-    port = int(os.environ.get("PORT", 8000))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    logging.info(f"🌐 Webserver started on port {port}")
-
 # --- Main ---
 
 async def main():
@@ -157,9 +147,22 @@ async def main():
     application.add_handler(CommandHandler("test", test_reminder))
     application.add_error_handler(error_handler)
 
-    # Mulai webserver dan bot polling secara paralel
-    await start_webserver()
-    await application.run_polling()
+    # Set webhook ke URL Render kamu
+    WEBHOOK_PATH = f"/{TOKEN}"
+    await application.bot.set_webhook(f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}")
+    logging.info(f"🌐 Webhook set ke {RENDER_EXTERNAL_URL}{WEBHOOK_PATH}")
+
+    # Jalankan aiohttp server
+    app = web.Application()
+    app.router.add_post(WEBHOOK_PATH, application.webhook_handler())
+    app.router.add_get("/", lambda request: web.Response(text="Bot is running"))
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8000)))
+    await site.start()
+    logging.info(f"✅ Webhook server berjalan di port {os.environ.get('PORT', 8000)}")
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
