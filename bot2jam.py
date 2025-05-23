@@ -157,7 +157,6 @@ async def main():
     application.add_handler(CommandHandler("test", test_reminder))
     application.add_error_handler(error_handler)
 
-    # Setup aiohttp webserver with webhook and healthcheck
     app = web.Application()
     app["application"] = application
     app.add_routes([
@@ -165,7 +164,6 @@ async def main():
         web.post(WEBHOOK_PATH, handle_webhook),
     ])
 
-    # Set webhook on Telegram server
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
         logging.info(f"🌐 Webhook set to {WEBHOOK_URL}")
@@ -180,11 +178,11 @@ async def main():
     await site.start()
     logging.info(f"🌐 Webserver started on port {port}")
 
-    # Start the bot (it will process updates from queue)
     await application.initialize()
     await application.start()
-    await application.updater.start_polling()  # Still needed for job queue, but won't fetch updates from Telegram since webhook is set
-    await application.updater.idle()
+
+    # Infinite wait supaya program gak langsung keluar
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
