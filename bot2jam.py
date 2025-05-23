@@ -64,17 +64,6 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise ValueError("Jam atau menit tidak valid.")
 
-            # Kita buat waktu lokal Asia/Jakarta saat ini,
-            # lalu buat datetime kombinasi waktu sekarang dan jam:menit input,
-            # lalu ambil waktu lokal (timezone-aware)
-            now = datetime.datetime.now(timezone)
-            scheduled_time = datetime.time(hour=hour, minute=minute)
-            scheduled_dt = datetime.datetime.combine(now.date(), scheduled_time)
-            scheduled_dt = timezone.localize(scheduled_dt)
-
-            # Karena job_queue run_daily terima time tanpa tzinfo,
-            # kita ambil jam dan menit lokal saja, dan gunakan run_daily tanpa tzinfo.
-            # Tapi harus pastikan server jalan di timezone yang sama (Asia/Jakarta)
             waktu = datetime.time(hour=hour, minute=minute)
 
             job = context.job_queue.run_daily(
@@ -89,7 +78,7 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.info(f"✅ Menjadwalkan pengingat {waktu_str} untuk chat_id {chat_id}")
 
         except Exception as e:
-            await update.message.reply_text(f"⛔ Format salah atau waktu tidak valid: {waktu_str}")
+            await update.message.reply_text(f"⛔️ Format salah atau waktu tidak valid: {waktu_str}")
             logging.error(f"❌ Error parsing time {waktu_str}: {e}")
             return
 
@@ -121,7 +110,7 @@ async def test_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         context.job_queue.run_once(
             reminder,
-            when=60,  # delay dalam detik (60 detik = 1 menit)
+            when=60,
             chat_id=chat_id,
             name="test_reminder",
             data=chat_id
@@ -191,16 +180,11 @@ async def main():
     await site.start()
     logging.info(f"🌐 Webserver started on port {port}")
 
-    # Start the bot (it will process updates from queue)
+    # Start the bot (processes updates from queue)
     await application.initialize()
     await application.start()
-    # Kalau sudah pakai webhook, jangan polling
-    # await application.updater.start_polling()  # hapus ini
-    # await application.updater.idle()           # hapus ini juga
-
-    # Jangan keluar, biar server tetap jalan
-    while True:
-        await asyncio.sleep(3600)
+    # Karena webhook, tidak perlu polling
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
