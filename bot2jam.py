@@ -37,14 +37,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reminder(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.data
-    logging.info(f"🔔 Menjalankan pengingat untuk chat_id {chat_id}")
+    now = datetime.datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
+    logging.info(f"🔔 Menjalankan pengingat untuk chat_id {chat_id} pada {now}")
     await context.bot.send_message(
         chat_id,
-        text="🔔 Woi jam berapa ini? Kau pikir tugas itu bisa siap sendiri? Jangan nanti-nanti kau bilang 'lupa pulak kau nanti' 🔔"
+        text=f"🔔 Woi jam berapa ini? Kau pikir tugas itu bisa siap sendiri? Jangan nanti-nanti kau bilang 'lupa pulak kau nanti' 🔔\n(Waktu server: {now})"
     )
 
 async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+
+    # Hapus job lama kalau ada
     if chat_id in user_jobs:
         for job in user_jobs[chat_id]:
             job.schedule_removal()
@@ -64,17 +67,19 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise ValueError("Jam atau menit tidak valid.")
 
-            # Kita buat waktu lokal Asia/Jakarta saat ini,
-            # lalu buat datetime kombinasi waktu sekarang dan jam:menit input,
-            # lalu ambil waktu lokal (timezone-aware)
+            # Waktu lokal sekarang di timezone Asia/Jakarta
             now = datetime.datetime.now(timezone)
+
+            # Waktu yang ingin dijadwalkan, timezone aware
             scheduled_time = datetime.time(hour=hour, minute=minute)
             scheduled_dt = datetime.datetime.combine(now.date(), scheduled_time)
             scheduled_dt = timezone.localize(scheduled_dt)
 
-            # Karena job_queue run_daily terima time tanpa tzinfo,
-            # kita ambil jam dan menit lokal saja, dan gunakan run_daily tanpa tzinfo.
-            # Tapi harus pastikan server jalan di timezone yang sama (Asia/Jakarta)
+            # Jika waktu sudah lewat hari ini, jadwalkan besok
+            if scheduled_dt < now:
+                scheduled_dt += datetime.timedelta(days=1)
+
+            # run_daily terima waktu tanpa tzinfo, tapi kita kasih time_zone parameter
             waktu = datetime.time(hour=hour, minute=minute)
 
             job = context.job_queue.run_daily(
@@ -83,7 +88,7 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id,
                 name=f"reminder_{waktu_str}",
                 data=chat_id,
-		time_zone=timezone
+                time_zone=timezone
             )
             jobs.append(job)
             reminder_times.append(waktu_str)
@@ -195,11 +200,11 @@ async def main():
     # Start the bot (it will process updates from queue)
     await application.initialize()
     await application.start()
-    # Kalau sudah pakai webhook, jangan polling
-    # await application.updater.start_polling()  # hapus ini
+    # Jangan polling karena sudah pakai webhook
+    # await application.updater.start_polling()  # hapus ini kalau ada
     # await application.updater.idle()           # hapus ini juga
 
-    # Jangan keluar, biar server tetap jalan
+    # Biarkan proses tetap jalan
     while True:
         await asyncio.sleep(3600)
 
