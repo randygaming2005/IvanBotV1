@@ -82,7 +82,8 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 waktu,
                 chat_id=chat_id,
                 name=f"reminder_{waktu_str}",
-                data=chat_id
+                data=chat_id,
+		time_zone=timezone
             )
             jobs.append(job)
             reminder_times.append(waktu_str)
