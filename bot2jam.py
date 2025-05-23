@@ -164,7 +164,7 @@ async def main():
 
     await application.initialize()
     await application.start()
-    await application.running.wait_closed()  # keep alive
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
