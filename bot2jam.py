@@ -64,7 +64,18 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise ValueError("Jam atau menit tidak valid.")
 
-            waktu = datetime.time(hour=hour, minute=minute, tzinfo=timezone)
+            # Kita buat waktu lokal Asia/Jakarta saat ini,
+            # lalu buat datetime kombinasi waktu sekarang dan jam:menit input,
+            # lalu ambil waktu lokal (timezone-aware)
+            now = datetime.datetime.now(timezone)
+            scheduled_time = datetime.time(hour=hour, minute=minute)
+            scheduled_dt = datetime.datetime.combine(now.date(), scheduled_time)
+            scheduled_dt = timezone.localize(scheduled_dt)
+
+            # Karena job_queue run_daily terima time tanpa tzinfo,
+            # kita ambil jam dan menit lokal saja, dan gunakan run_daily tanpa tzinfo.
+            # Tapi harus pastikan server jalan di timezone yang sama (Asia/Jakarta)
+            waktu = datetime.time(hour=hour, minute=minute)
 
             job = context.job_queue.run_daily(
                 reminder,
@@ -110,7 +121,7 @@ async def test_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         context.job_queue.run_once(
             reminder,
-            when=datetime.timedelta(seconds=60),
+            when=60,  # delay dalam detik (60 detik = 1 menit)
             chat_id=chat_id,
             name="test_reminder",
             data=chat_id
@@ -157,6 +168,7 @@ async def main():
     application.add_handler(CommandHandler("test", test_reminder))
     application.add_error_handler(error_handler)
 
+    # Setup aiohttp webserver with webhook and healthcheck
     app = web.Application()
     app["application"] = application
     app.add_routes([
@@ -164,6 +176,7 @@ async def main():
         web.post(WEBHOOK_PATH, handle_webhook),
     ])
 
+    # Set webhook on Telegram server
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
         logging.info(f"🌐 Webhook set to {WEBHOOK_URL}")
@@ -178,11 +191,16 @@ async def main():
     await site.start()
     logging.info(f"🌐 Webserver started on port {port}")
 
+    # Start the bot (it will process updates from queue)
     await application.initialize()
     await application.start()
+    # Kalau sudah pakai webhook, jangan polling
+    # await application.updater.start_polling()  # hapus ini
+    # await application.updater.idle()           # hapus ini juga
 
-    # Infinite wait supaya program gak langsung keluar
-    await asyncio.Event().wait()
+    # Jangan keluar, biar server tetap jalan
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
