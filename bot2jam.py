@@ -2,6 +2,7 @@ import logging
 import datetime
 import pytz
 import os
+import asyncio
 from aiohttp import web
 from telegram import Update
 from telegram.ext import (
@@ -17,13 +18,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-# Get token and render domain from environment
-TOKEN = os.environ.get("BOT_TOKEN")
-RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
-
-if not TOKEN or not RENDER_EXTERNAL_URL:
-    raise RuntimeError("❌ BOT_TOKEN atau RENDER_EXTERNAL_URL belum diset di environment!")
-
+TOKEN = "8166249822:AAFcdKH1fEoEMkEGTmfuw71NbvwMmh4rGaI"  # Ganti dengan token kamu
 persistence = PicklePersistence(filepath="reminder_data.pkl")
 user_jobs = {}
 timezone = pytz.timezone("Asia/Jakarta")
@@ -129,9 +124,12 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# --- Main ---
+# --- Main with webhook ---
 
 async def main():
+    WEBHOOK_PATH = f"/{TOKEN}"
+    WEBHOOK_URL = f"https://ivanbotv1.onrender.com{WEBHOOK_PATH}"  # Ganti dengan domain kamu
+
     application = (
         ApplicationBuilder()
         .token(TOKEN)
@@ -147,22 +145,22 @@ async def main():
     application.add_handler(CommandHandler("test", test_reminder))
     application.add_error_handler(error_handler)
 
-    # Set webhook ke URL Render kamu
-    WEBHOOK_PATH = f"/{TOKEN}"
-    await application.bot.set_webhook(f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}")
-    logging.info(f"🌐 Webhook set ke {RENDER_EXTERNAL_URL}{WEBHOOK_PATH}")
+    # Set webhook Telegram ke URL kamu
+    await application.bot.set_webhook(WEBHOOK_URL)
+    logging.info(f"🌐 Webhook set ke {WEBHOOK_URL}")
 
-    # Jalankan aiohttp server
-    app = web.Application()
-    app.router.add_post(WEBHOOK_PATH, application.webhook_handler())
-    app.router.add_get("/", lambda request: web.Response(text="Bot is running"))
-
+    # Buat dan jalankan aiohttp server untuk menerima webhook dari Telegram
+    app = application.create_app()
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8000)))
     await site.start()
-    logging.info(f"✅ Webhook server berjalan di port {os.environ.get('PORT', 8000)}")
+
+    logging.info(f"🌐 Webserver dan bot siap menerima webhook di port {os.environ.get('PORT', 8000)}")
+
+    # Jangan keluar dari main agar server terus jalan
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
