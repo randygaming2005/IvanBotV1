@@ -12,18 +12,22 @@ from telegram.ext import (
     PicklePersistence,
 )
 
-# Logging setup
+# Setup logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 
-TOKEN = "8166249822:AAFcdKH1fEoEMkEGTmfuw71NbvwMmh4rGaI"  # Ganti dengan token kamu
+TOKEN = os.environ.get("TOKEN") or "YOUR_BOT_TOKEN_HERE"
+WEBHOOK_PATH = f"/{TOKEN}"
+WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE")  # ex: https://yourapp.onrender.com
+WEBHOOK_URL = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}" if WEBHOOK_URL_BASE else None
+
 persistence = PicklePersistence(filepath="reminder_data.pkl")
 user_jobs = {}
 timezone = pytz.timezone("Asia/Jakarta")
 
-# --- Telegram Bot Handlers ---
+# --- Handlers ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -124,12 +128,20 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# --- Main with webhook ---
+# --- AIOHTTP Server for webhook & health check ---
+
+async def handle_root(request):
+    return web.Response(text="Bot is running")
+
+async def handle_webhook(request):
+    app = request.app["application"]
+    update = await request.json()
+    from telegram import Update as TgUpdate
+    tg_update = TgUpdate.de_json(update, app.bot)
+    await app.update_queue.put(tg_update)
+    return web.Response()
 
 async def main():
-    WEBHOOK_PATH = f"/{TOKEN}"
-    WEBHOOK_URL = f"https://ivanbotv1.onrender.com{WEBHOOK_PATH}"  # Ganti dengan domain kamu
-
     application = (
         ApplicationBuilder()
         .token(TOKEN)
@@ -145,22 +157,34 @@ async def main():
     application.add_handler(CommandHandler("test", test_reminder))
     application.add_error_handler(error_handler)
 
-    # Set webhook Telegram ke URL kamu
-    await application.bot.set_webhook(WEBHOOK_URL)
-    logging.info(f"🌐 Webhook set ke {WEBHOOK_URL}")
+    # Setup aiohttp webserver with webhook and healthcheck
+    app = web.Application()
+    app["application"] = application
+    app.add_routes([
+        web.get("/", handle_root),
+        web.post(WEBHOOK_PATH, handle_webhook),
+    ])
 
-    # Buat dan jalankan aiohttp server untuk menerima webhook dari Telegram
-    app = application.create_app()
+    # Set webhook on Telegram server
+    if WEBHOOK_URL:
+        await application.bot.set_webhook(WEBHOOK_URL)
+        logging.info(f"🌐 Webhook set to {WEBHOOK_URL}")
+    else:
+        logging.warning("⚠️ WEBHOOK_URL_BASE environment variable not set, webhook disabled!")
+
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8000)))
+
+    port = int(os.environ.get("PORT", 8000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    logging.info(f"🌐 Webserver started on port {port}")
 
-    logging.info(f"🌐 Webserver dan bot siap menerima webhook di port {os.environ.get('PORT', 8000)}")
-
-    # Jangan keluar dari main agar server terus jalan
-    while True:
-        await asyncio.sleep(3600)
+    # Start the bot (it will process updates from queue)
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()  # Still needed for job queue, but won't fetch updates from Telegram since webhook is set
+    await application.updater.idle()
 
 if __name__ == "__main__":
     asyncio.run(main())
