@@ -23,6 +23,7 @@ WEBHOOK_PATH = f"/{TOKEN}"
 WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE")  # ex: https://yourapp.onrender.com
 WEBHOOK_URL = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}" if WEBHOOK_URL_BASE else None
 
+# Persistence untuk menyimpan data antar restart bot
 persistence = PicklePersistence(filepath="reminder_data.pkl")
 user_jobs = {}
 timezone = pytz.timezone("Asia/Jakarta")
@@ -37,17 +38,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reminder(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.data
-    now = datetime.datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
-    logging.info(f"🔔 Menjalankan pengingat untuk chat_id {chat_id} pada {now}")
+    logging.info(f"🔔 Menjalankan pengingat untuk chat_id {chat_id}")
     await context.bot.send_message(
         chat_id,
-        text=f"🔔 Woi jam berapa ini? Kau pikir tugas itu bisa siap sendiri? Jangan nanti-nanti kau bilang 'lupa pulak kau nanti' 🔔\n(Waktu server: {now})"
+        text="🔔 Woi jam berapa ini? Kau pikir tugas itu bisa siap sendiri? Jangan nanti-nanti kau bilang 'lupa pulak kau nanti' 🔔"
     )
 
 async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
-    # Hapus job lama kalau ada
+    # Hapus job lama jika ada
     if chat_id in user_jobs:
         for job in user_jobs[chat_id]:
             job.schedule_removal()
@@ -67,19 +67,7 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise ValueError("Jam atau menit tidak valid.")
 
-            # Waktu lokal sekarang di timezone Asia/Jakarta
-            now = datetime.datetime.now(timezone)
-
-            # Waktu yang ingin dijadwalkan, timezone aware
-            scheduled_time = datetime.time(hour=hour, minute=minute)
-            scheduled_dt = datetime.datetime.combine(now.date(), scheduled_time)
-            scheduled_dt = timezone.localize(scheduled_dt)
-
-            # Jika waktu sudah lewat hari ini, jadwalkan besok
-            if scheduled_dt < now:
-                scheduled_dt += datetime.timedelta(days=1)
-
-            # run_daily terima waktu tanpa tzinfo, tapi kita kasih time_zone parameter
+            # Waktu lokal server diasumsikan Asia/Jakarta tanpa tzinfo
             waktu = datetime.time(hour=hour, minute=minute)
 
             job = context.job_queue.run_daily(
@@ -88,7 +76,6 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id,
                 name=f"reminder_{waktu_str}",
                 data=chat_id,
-                time_zone=timezone
             )
             jobs.append(job)
             reminder_times.append(waktu_str)
@@ -174,7 +161,7 @@ async def main():
     application.add_handler(CommandHandler("test", test_reminder))
     application.add_error_handler(error_handler)
 
-    # Setup aiohttp webserver with webhook and healthcheck
+    # Setup aiohttp webserver dengan webhook dan healthcheck
     app = web.Application()
     app["application"] = application
     app.add_routes([
@@ -182,7 +169,7 @@ async def main():
         web.post(WEBHOOK_PATH, handle_webhook),
     ])
 
-    # Set webhook on Telegram server
+    # Set webhook ke Telegram server jika ada
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
         logging.info(f"🌐 Webhook set to {WEBHOOK_URL}")
@@ -197,14 +184,15 @@ async def main():
     await site.start()
     logging.info(f"🌐 Webserver started on port {port}")
 
-    # Start the bot (it will process updates from queue)
+    # Start bot
     await application.initialize()
     await application.start()
-    # Jangan polling karena sudah pakai webhook
-    # await application.updater.start_polling()  # hapus ini kalau ada
-    # await application.updater.idle()           # hapus ini juga
 
-    # Biarkan proses tetap jalan
+    # Jangan polling kalau sudah webhook
+    # await application.updater.start_polling()  # jangan dipakai
+    # await application.updater.idle()           # jangan dipakai juga
+
+    # Supaya terus jalan
     while True:
         await asyncio.sleep(3600)
 
