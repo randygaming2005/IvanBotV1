@@ -68,12 +68,11 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise ValueError("Jam atau menit tidak valid.")
 
-            # Set waktu dengan timezone Asia/Jakarta
             waktu = datetime.time(hour=hour, minute=minute, tzinfo=timezone)
 
             job = context.job_queue.run_daily(
                 reminder,
-                waktu,
+                time=waktu,
                 chat_id=chat_id,
                 name=f"reminder_{waktu_str}",
                 data=chat_id,
@@ -137,6 +136,11 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+# --- JobQueue starter ---
+async def start_jobqueue(app):
+    await app.job_queue.start()
+    logging.info("✅ JobQueue dimulai.")
+
 # --- AIOHTTP Server for webhook & health check ---
 
 async def handle_root(request):
@@ -150,17 +154,12 @@ async def handle_webhook(request):
     await app.update_queue.put(tg_update)
     return web.Response()
 
-async def run_jobqueue(application):
-    while True:
-        await application.job_queue.tick()
-        await asyncio.sleep(1)
-
 async def main():
     application = (
         ApplicationBuilder()
         .token(TOKEN)
         .persistence(persistence)
-        .post_init(lambda app: logging.info("✅ Bot siap berjalan dengan JobQueue aktif..."))
+        .post_init(start_jobqueue)
         .build()
     )
 
@@ -180,7 +179,6 @@ async def main():
         web.post(WEBHOOK_PATH, handle_webhook),
     ])
 
-    # Set webhook ke Telegram server jika ada
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
         logging.info(f"🌐 Webhook set to {WEBHOOK_URL}")
@@ -195,12 +193,14 @@ async def main():
     await site.start()
     logging.info(f"🌐 Webserver started on port {port}")
 
-    # Start bot & job queue
     await application.initialize()
     await application.start()
-    asyncio.create_task(run_jobqueue(application))
 
-    # Supaya tetap jalan
+    # Jangan polling karena pakai webhook
+    # await application.updater.start_polling()
+    # await application.updater.idle()
+
+    # Keep alive
     while True:
         await asyncio.sleep(3600)
 
