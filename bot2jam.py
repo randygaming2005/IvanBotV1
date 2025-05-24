@@ -38,17 +38,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def reminder(context: ContextTypes.DEFAULT_TYPE):
-    chat_id = context.job.data
-    logging.info(f"🔔 Menjalankan pengingat untuk chat_id {chat_id}")
+    data = context.job.data
+    chat_id = data["chat_id"]
+    thread_id = data.get("thread_id")
+
+    logging.info(f"🔔 Menjalankan pengingat untuk chat_id {chat_id}, thread_id={thread_id}")
     await context.bot.send_message(
-        chat_id,
+        chat_id=chat_id,
+        message_thread_id=thread_id,
         text="🔔 Woi jam berapa ini? Kau pikir tugas itu bisa siap sendiri? Jangan nanti-nanti kau bilang 'lupa pulak kau nanti' 🔔"
     )
 
 async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    thread_id = update.message.message_thread_id  # Akan None jika bukan dari topik
 
-    # Hapus job lama jika ada
     if chat_id in user_jobs:
         for job in user_jobs[chat_id]:
             job.schedule_removal()
@@ -75,11 +79,11 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 time=waktu,
                 chat_id=chat_id,
                 name=f"reminder_{waktu_str}",
-                data=chat_id,
+                data={"chat_id": chat_id, "thread_id": thread_id}
             )
             jobs.append(job)
             reminder_times.append(waktu_str)
-            logging.info(f"✅ Menjadwalkan pengingat {waktu_str} untuk chat_id {chat_id}")
+            logging.info(f"✅ Menjadwalkan pengingat {waktu_str} untuk chat_id {chat_id}, thread_id={thread_id}")
 
         except Exception as e:
             await update.message.reply_text(f"⛔ Format salah atau waktu tidak valid: {waktu_str}")
@@ -111,13 +115,15 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def test_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    thread_id = update.message.message_thread_id
+
     try:
         context.job_queue.run_once(
             reminder,
-            when=60,  # delay dalam detik (60 detik = 1 menit)
+            when=60,
             chat_id=chat_id,
             name="test_reminder",
-            data=chat_id
+            data={"chat_id": chat_id, "thread_id": thread_id}
         )
         await update.message.reply_text("⏳ Pengingat akan dikirim dalam 1 menit.")
     except Exception as e:
@@ -142,7 +148,6 @@ async def start_jobqueue(app):
     logging.info("✅ JobQueue dimulai.")
 
 # --- AIOHTTP Server for webhook & health check ---
-
 async def handle_root(request):
     return web.Response(text="Bot is running")
 
@@ -196,11 +201,6 @@ async def main():
     await application.initialize()
     await application.start()
 
-    # Jangan polling karena pakai webhook
-    # await application.updater.start_polling()
-    # await application.updater.idle()
-
-    # Keep alive
     while True:
         await asyncio.sleep(3600)
 
