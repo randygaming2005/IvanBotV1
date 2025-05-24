@@ -68,8 +68,8 @@ async def set_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise ValueError("Jam atau menit tidak valid.")
 
-            # Waktu lokal server diasumsikan Asia/Jakarta tanpa tzinfo
-            waktu = datetime.time(hour=hour, minute=minute)
+            # Set waktu dengan timezone Asia/Jakarta
+            waktu = datetime.time(hour=hour, minute=minute, tzinfo=timezone)
 
             job = context.job_queue.run_daily(
                 reminder,
@@ -126,8 +126,8 @@ async def test_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Error scheduling test reminder: {e}")
 
 async def waktu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.datetime.now()
-    await update.message.reply_text(f"Waktu server sekarang:\n{now.strftime('%Y-%m-%d %H:%M:%S')} (naive, tanpa timezone info)")
+    now = datetime.datetime.now(timezone)
+    await update.message.reply_text(f"Waktu server sekarang:\n{now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logging.error("❗ Exception occurred:", exc_info=context.error)
@@ -150,6 +150,11 @@ async def handle_webhook(request):
     await app.update_queue.put(tg_update)
     return web.Response()
 
+async def run_jobqueue(application):
+    while True:
+        await application.job_queue.tick()
+        await asyncio.sleep(1)
+
 async def main():
     application = (
         ApplicationBuilder()
@@ -164,7 +169,7 @@ async def main():
     application.add_handler(CommandHandler("list", list_times))
     application.add_handler(CommandHandler("stop", stop))
     application.add_handler(CommandHandler("test", test_reminder))
-    application.add_handler(CommandHandler("waktu", waktu))  # Tambahan command waktu
+    application.add_handler(CommandHandler("waktu", waktu))
     application.add_error_handler(error_handler)
 
     # Setup aiohttp webserver dengan webhook dan healthcheck
@@ -190,15 +195,12 @@ async def main():
     await site.start()
     logging.info(f"🌐 Webserver started on port {port}")
 
-    # Start bot
+    # Start bot & job queue
     await application.initialize()
     await application.start()
+    asyncio.create_task(run_jobqueue(application))
 
-    # Jangan polling kalau sudah webhook
-    # await application.updater.start_polling()  # jangan dipakai
-    # await application.updater.idle()           # jangan dipakai juga
-
-    # Supaya terus jalan
+    # Supaya tetap jalan
     while True:
         await asyncio.sleep(3600)
 
