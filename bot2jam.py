@@ -6,15 +6,13 @@ import asyncio
 from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, PicklePersistence
+    ApplicationBuilder, CommandHandler, ContextTypes,
+    CallbackQueryHandler, PicklePersistence
 )
 
-# Setup logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
-TOKEN = os.environ.get("TOKEN") or "YOUR_BOT_TOKEN_HERE"
+TOKEN = os.environ.get("TOKEN") or "YOUR_BOT_TOKEN"
 WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE")
 WEBHOOK_PATH = f"/{TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}" if WEBHOOK_URL_BASE else None
@@ -22,38 +20,21 @@ WEBHOOK_URL = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}" if WEBHOOK_URL_BASE else None
 timezone = pytz.timezone("Asia/Jakarta")
 persistence = PicklePersistence(filepath="data.pkl")
 
-# Jadwal lengkap per sesi
-JADWAL_PAGI = [
-    "07:00 cek phising", "07:05 cek link pc indo", "07:05 cek dana PGA BL", "07:15 req dana PGA",
-    "07:30 paito berita", "08:00 total depo", "08:00 Slot Harian", "08:00 jadwalkan bukti jp ke jam 10.00",
-    "08:10 BC link alternatif ke jam 12.00", "09:00 jowo pools", "09:10 TO semua pasaran",
-    "09:30 Audit BCA", "09:45 First Register", "10:00 BC maintenance done ( kamis )", "10:00 cek data selisih",
-    "10:00 total depo", "10:30 isi data bola ( > jam 1 )", "11:00 bc maintenance WL ( selasa )",
-    "11:00 bc jadwal bola", "12:00 total depo", "12:00 slot & rng mingguan", "12:30 cek phising",
-    "12:50 live ttm", "13:00 wd report", "13:00 BC Result Toto Macau", "13:30 slot & rng harian",
-    "14:00 BC Result Sydney", "14:00 depo harian"
-]
-
-JADWAL_SIANG = [
-    "15:30 cek link", "16:00 cek phising", "16:00 deposit harian", "16:00 isi data selisih",
-    "16:00 BC Result Toto Macau", "16:30 jadwalkan bukti jp ke jam 17.00",
-    "17:40 SLOT harian ( kalau tifak ada sgp jam 18.30 )", "17:50 BC Result Singapore",
-    "18:00 5 lucky ball", "18:00 deposit harian", "18:05 BC link alt ke jam 19.00",
-    "18:10 isi data wlb2c", "19:00 BC Result Toto Macau", "19:30 Audit BCA", "19:45 First Register",
-    "20:00 deposit harian", "21:00 jowo pools", "21:00 cek phising", "21:00 wd report",
-    "22:00 BC Result Toto Macau", "22:00 deposit harian", "22:45 Slot harian"
-]
-
-JADWAL_MALAM = [
-    "23:00 SLOT harian", "23:10 BC Result Hongkong", "23:30 cek link & cek phising",
-    "23:30 BC rtp slot jam 00.10", "23:40 depo harian", "00:01 update total bonus",
-    "00:05 BC Result Toto Macau", "00:30 BC link alt jam 5", "00:30 BC bukti JP jam 4",
-    "00:30 BC maintenance mingguan ke jam 4 ( kamis )", "00:45 slot harian",
-    "01:00 isi biaya pulsa / isi akuran ( senin subuh )", "01:30 isi data promo",
-    "02:00 total depo", "02:00 cek pl config", "03:30 Audit BCA", "03:45 First Register",
-    "04:00 total depo", "05:00 cek phising", "05:00 wd report", "05:00 Slot harian",
-    "05:45 total depo"
-]
+# Jadwal Tugas
+JADWAL = {
+    "pagi": [
+        ("07:00", "cek phising"), ("07:05", "cek link pc indo"),
+        ("08:00", "total depo"), ("10:00", "cek data selisih"),
+    ],
+    "siang": [
+        ("15:30", "cek link"), ("16:00", "deposit harian"),
+        ("18:00", "5 lucky ball"), ("20:00", "deposit harian"),
+    ],
+    "malam": [
+        ("23:00", "SLOT harian"), ("00:01", "update total bonus"),
+        ("02:00", "total depo"), ("05:00", "cek phising"),
+    ],
+}
 
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
@@ -70,75 +51,103 @@ def jadwal_keyboard(jadwal_list, done_set):
     buttons.append([InlineKeyboardButton("🔙 Kembali", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(buttons)
 
+def format_jadwal(jadwal_list, done_set):
+    return "\n".join([
+        f"{'✅' if idx in done_set else '⬜'} {item}" for idx, item in enumerate(jadwal_list)
+    ])
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    context.bot_data["chat_id"] = chat_id
     await update.message.reply_text("Halo! Silakan pilih jadwal yang ingin dilihat:", reply_markup=main_menu_keyboard())
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.chat_data.pop("done_pagi", None)
     context.chat_data.pop("done_siang", None)
     context.chat_data.pop("done_malam", None)
-    await update.message.reply_text("✅ Semua tugas telah direset. Siap digunakan kembali besok!")
+    await update.message.reply_text("✅ Semua tugas telah direset.")
 
 async def waktu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.now(timezone)
     await update.message.reply_text(f"Waktu server sekarang:\n{now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-def format_jadwal(jadwal_list, done_set):
-    return "\n".join([
-        f"{'✅' if idx in done_set else '⬜'} {item}" for idx, item in enumerate(jadwal_list)
-    ])
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
-    chat_data = context.chat_data
     data = query.data
+    chat_data = context.chat_data
 
     if data == "back_to_menu":
         await query.edit_message_text("Silakan pilih jadwal yang ingin dilihat:", reply_markup=main_menu_keyboard())
         return
 
     if data.startswith("jadwal_"):
-        current = data.split("_")[1]
-        chat_data["current_jadwal"] = current
-        jadwal_map = {"pagi": JADWAL_PAGI, "siang": JADWAL_SIANG, "malam": JADWAL_MALAM}
-        done_set = chat_data.setdefault(f"done_{current}", set())
+        sesi = data.split("_")[1]
+        chat_data["current_jadwal"] = sesi
+        tugas_list = [item[1] for item in JADWAL[sesi]]
+        done_set = chat_data.setdefault(f"done_{sesi}", set())
         await query.edit_message_text(
-            f"JADWAL {current.upper()}:\n\n" + format_jadwal(jadwal_map[current], done_set),
-            reply_markup=jadwal_keyboard(jadwal_map[current], done_set),
+            f"JADWAL {sesi.upper()}:\n\n" + format_jadwal(tugas_list, done_set),
+            reply_markup=jadwal_keyboard(tugas_list, done_set),
         )
-        return
 
     if data.startswith("toggle_done:"):
         idx = int(data.split(":")[1])
-        current = chat_data.get("current_jadwal")
-        if not current:
+        sesi = chat_data.get("current_jadwal")
+        if not sesi:
             await query.answer("Pilih jadwal dulu.", show_alert=True)
             return
 
-        key = f"done_{current}"
+        key = f"done_{sesi}"
         done_set = chat_data.setdefault(key, set())
         if idx in done_set:
             done_set.remove(idx)
         else:
             done_set.add(idx)
 
-        jadwal_map = {"pagi": JADWAL_PAGI, "siang": JADWAL_SIANG, "malam": JADWAL_MALAM}
+        tugas_list = [item[1] for item in JADWAL[sesi]]
         await query.edit_message_text(
-            f"JADWAL {current.upper()}:\n\n" + format_jadwal(jadwal_map[current], done_set),
-            reply_markup=jadwal_keyboard(jadwal_map[current], done_set),
+            f"JADWAL {sesi.upper()}:\n\n" + format_jadwal(tugas_list, done_set),
+            reply_markup=jadwal_keyboard(tugas_list, done_set),
         )
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logging.error("Exception occurred:", exc_info=context.error)
-    if hasattr(update, "effective_chat") and update.effective_chat:
-        try:
-            await context.bot.send_message(update.effective_chat.id, text="⚠️ Terjadi kesalahan. Silakan coba lagi nanti.")
-        except Exception:
-            pass
+async def kirim_pengingat(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    tugas = job.data
+    chat_id = job.chat_id
+    await context.bot.send_message(chat_id=chat_id, text=f"⏰ Pengingat: {tugas}")
 
-# Webhook handler
+def schedule_all_jobs(application):
+    chat_id = application.bot_data.get("chat_id")
+    if not chat_id:
+        logging.warning("Chat ID belum tersedia. Jalankan /start dulu.")
+        return
+
+    for sesi, daftar in JADWAL.items():
+        for waktu_str, tugas in daftar:
+            jam, menit = map(int, waktu_str.split(":"))
+            waktu_tugas = datetime.time(hour=jam, minute=menit, tzinfo=timezone)
+            pengingat_waktu = (datetime.datetime.combine(datetime.date.today(), waktu_tugas) - datetime.timedelta(minutes=5)).time()
+
+            application.job_queue.run_daily(
+                callback=kirim_pengingat,
+                time=pengingat_waktu,
+                chat_id=chat_id,
+                name=f"{sesi}_{tugas}",
+                data=tugas
+            )
+            logging.info(f"Dijadwalkan pengingat: {tugas} pukul {pengingat_waktu}")
+
+async def aktifkan_pengingat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    context.bot_data["chat_id"] = chat_id
+    schedule_all_jobs(context.application)
+    await update.message.reply_text("✅ Pengingat aktif. Bot akan mengirim notifikasi 5 menit sebelum tiap tugas.")
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logging.error("Exception:", exc_info=context.error)
+
+# Webhook handlers
 async def handle_root(request):
     return web.Response(text="Bot is running")
 
@@ -156,23 +165,19 @@ async def main():
     )
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("waktu", waktu))
     application.add_handler(CommandHandler("reset", reset))
+    application.add_handler(CommandHandler("waktu", waktu))
+    application.add_handler(CommandHandler("aktifkan_pengingat", aktifkan_pengingat))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_error_handler(error_handler)
 
     app = web.Application()
     app["application"] = application
-    app.add_routes([
-        web.get("/", handle_root),
-        web.post(WEBHOOK_PATH, handle_webhook),
-    ])
+    app.add_routes([web.get("/", handle_root), web.post(WEBHOOK_PATH, handle_webhook)])
 
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
         logging.info(f"Webhook set to {WEBHOOK_URL}")
-    else:
-        logging.warning("WEBHOOK_URL_BASE not set, webhook disabled!")
 
     runner = web.AppRunner(app)
     await runner.setup()
