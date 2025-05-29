@@ -65,11 +65,12 @@ def main_menu_keyboard():
     ])
 
 def jadwal_keyboard(jadwal_list, done_set):
-    buttons = [
-        [InlineKeyboardButton(f"{'✅' if idx in done_set else '⬜'} {item}", callback_data=f"toggle_done:{idx}")]
-        for idx, item in enumerate(jadwal_list)
-    ]
-    # Tambahkan tombol kembali
+    buttons = []
+    for idx, item in enumerate(jadwal_list):
+        buttons.append([InlineKeyboardButton(
+            f"{'✅' if idx in done_set else '⬜'} {item}",
+            callback_data=f"toggle_done:{idx}"
+        )])
     buttons.append([InlineKeyboardButton("🔙 Kembali", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(buttons)
 
