@@ -151,7 +151,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_data = context.user_data
+    chat_data = context.chat_data
     data = query.data
 
     if data == "back_to_menu":
@@ -161,20 +161,59 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data.startswith("jadwal_"):
-        current = data.split("_")[1]
-        user_data["current_jadwal"] = current
+    if data == "jadwal_pagi":
+        chat_data["current_jadwal"] = "pagi"
+        done_set = chat_data.setdefault("done_pagi", set())
+        await query.edit_message_text(
+            "JADWAL PAGI:\n\n" + format_jadwal(JADWAL_PAGI, done_set),
+            reply_markup=jadwal_keyboard(JADWAL_PAGI, done_set),
+        )
+        return
+
+    if data == "jadwal_siang":
+        chat_data["current_jadwal"] = "siang"
+        done_set = chat_data.setdefault("done_siang", set())
+        await query.edit_message_text(
+            "JADWAL SIANG:\n\n" + format_jadwal(JADWAL_SIANG, done_set),
+            reply_markup=jadwal_keyboard(JADWAL_SIANG, done_set),
+        )
+        return
+
+    if data == "jadwal_malam":
+        chat_data["current_jadwal"] = "malam"
+        done_set = chat_data.setdefault("done_malam", set())
+        await query.edit_message_text(
+            "JADWAL MALAM:\n\n" + format_jadwal(JADWAL_MALAM, done_set),
+            reply_markup=jadwal_keyboard(JADWAL_MALAM, done_set),
+        )
+        return
+
+    if data.startswith("toggle_done:"):
+        idx = int(data.split(":")[1])
+        current = chat_data.get("current_jadwal")
+        if not current:
+            await query.answer("Pilih jadwal dulu.", show_alert=True)
+            return
+
         key = f"done_{current}"
-        done_set = user_data.setdefault(key, set())
+        done_set = chat_data.setdefault(key, set())
+
+        if idx in done_set:
+            done_set.remove(idx)
+        else:
+            done_set.add(idx)
+
         jadwal_list = {
             "pagi": JADWAL_PAGI,
             "siang": JADWAL_SIANG,
             "malam": JADWAL_MALAM,
         }[current]
+
         await query.edit_message_text(
             f"JADWAL {current.upper()}:\n\n" + format_jadwal(jadwal_list, done_set),
             reply_markup=jadwal_keyboard(jadwal_list, done_set),
         )
+
         return
 
     if data.startswith("toggle_done:"):
