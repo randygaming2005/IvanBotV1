@@ -1,261 +1,205 @@
-import logging
 import os
-import datetime
-import pytz
+import logging
 import asyncio
 from aiohttp import web
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import datetime
+import pytz
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, PicklePersistence
+    ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 )
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-TOKEN = os.environ.get("TOKEN")
-WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE")
-WEBHOOK_PATH = f"/{TOKEN}"
-WEBHOOK_URL = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}" if WEBHOOK_URL_BASE else None
-PORT = int(os.environ.get("PORT", 8000))
-TIMEZONE = pytz.timezone(os.environ.get("TZ", "Asia/Jakarta"))
+TOKEN = os.getenv("TOKEN")
+PORT = int(os.getenv("PORT", "8000"))
+WEBHOOK_URL_BASE = os.getenv("WEBHOOK_URL_BASE")
+WEBHOOK_URL_PATH = f"/{TOKEN}"
+TZ = pytz.timezone(os.getenv("TZ", "Asia/Jakarta"))
 
-persistence = PicklePersistence(filepath="data.pkl")
-
-# --- Jadwal yang kamu kirim ---
-JADWAL_PAGI = [
-    "07:05 cek link pc indo", "07:00 cek phising", "07:05 cek dana PGA BL", "07:15 req dana PGA",
-    "07:30 paito berita", "08:00 total depo", "08:00 Slot Harian", "08:00 jadwalkan bukti jp ke jam 10.00",
-    "08:10 BC link alternatif ke jam 12.00", "09:00 jowo pools", "09:10 TO semua pasaran",
-    "09:30 Audit BCA", "09:45 First Register", "10:00 BC maintenance done ( kamis )",
-    "10:00 cek data selisih", "10:00 total depo", "10:30 isi data bola ( > jam 1 )",
-    "11:00 bc maintenance WL ( selasa )", "11:00 bc jadwal bola", "12:00 total depo",
-    "12:00 slot & rng mingguan", "12:50 live ttm", "12:30 cek phising", "13:00 wd report",
-    "13:00 BC Result Toto Macau", "13:30 slot & rng harian", "14:00 BC Result Sydney", "14:00 depo harian"
+# Jadwal lengkap sesuai yang kamu kirim (format "HH:MM", "Kegiatan")
+jadwal_pagi = [
+    ("07:00", "cek phising"),
+    ("07:05", "cek link pc indo"),
+    ("07:05", "cek dana PGA BL"),
+    ("07:15", "req dana PGA"),
+    ("07:30", "paito berita"),
+    ("08:00", "total depo"),
+    ("08:00", "Slot Harian"),
+    ("08:00", "jadwalkan bukti jp ke jam 10.00"),
+    ("08:10", "BC link alternatif ke jam 12.00"),
+    ("09:00", "jowo pools"),
+    ("09:10", "TO semua pasaran"),
+    ("09:30", "Audit BCA"),
+    ("09:45", "First Register"),
+    ("10:00", "BC maintenance done ( kamis )"),
+    ("10:00", "cek data selisih"),
+    ("10:00", "total depo"),
+    ("10:30", "isi data bola ( > jam 1 )"),
+    ("11:00", "bc maintenance WL ( selasa )"),
+    ("11:00", "bc jadwal bola"),
+    ("12:00", "total depo"),
+    ("12:00", "slot & rng mingguan"),
+    ("12:30", "cek phising"),
+    ("12:50", "live ttm"),
+    ("13:00", "wd report"),
+    ("13:00", "BC Result Toto Macau"),
+    ("13:30", "slot & rng harian"),
+    ("14:00", "BC Result Sydney"),
+    ("14:00", "depo harian"),
 ]
 
-JADWAL_SIANG = [
-    "15:30 cek link", "16:00 cek phising", "16:00 deposit harian", "16:30 jadwalkan bukti jp ke jam 17.00",
-    "16:00 isi data selisih", "16:00 BC Result Toto Macau", "17:40 SLOT harian ( kalau tifak ada sgp jam 18.30 )",
-    "17:50 BC Result Singapore", "18:00 5 lucky ball", "18:00 deposit harian", "18:05 BC link alt ke jam 19.00",
-    "18:10 isi data wlb2c", "19:00 BC Result Toto Macau", "19:30 Audit BCA", "19:45 First Register",
-    "20:00 deposit harian", "21:00 jowo pools", "21:00 cek phising", "21:00 wd report",
-    "22:00 BC Result Toto Macau", "22:00 deposit harian", "22:45 Slot harian"
+jadwal_siang = [
+    ("15:30", "cek link"),
+    ("16:00", "cek phising"),
+    ("16:00", "deposit harian"),
+    ("16:00", "isi data selisih"),
+    ("16:00", "BC Result Toto Macau"),
+    ("16:30", "jadwalkan bukti jp ke jam 17.00"),
+    ("17:40", "SLOT harian ( kalau tifak ada sgp jam 18.30 )"),
+    ("17:50", "BC Result Singapore"),
+    ("18:00", "5 lucky ball"),
+    ("18:00", "deposit harian"),
+    ("18:05", "BC link alt ke jam 19.00"),
+    ("18:10", "isi data wlb2c"),
+    ("19:00", "BC Result Toto Macau"),
+    ("19:30", "Audit BCA"),
+    ("19:45", "First Register"),
+    ("20:00", "deposit harian"),
+    ("21:00", "jowo pools"),
+    ("21:00", "cek phising"),
+    ("21:00", "wd report"),
+    ("22:00", "BC Result Toto Macau"),
+    ("22:00", "deposit harian"),
+    ("22:45", "Slot harian"),
 ]
 
-JADWAL_MALAM = [
-    "23:00 SLOT harian", "23:10 BC Result Hongkong", "23:30 cek link & cek phising", "23:30 BC rtp slot jam 00.10",
-    "23:40 depo harian", "00:05 BC Result Toto Macau", "00:01 update total bonus", "00:30 BC link alt jam 5",
-    "00:30 BC bukti JP jam 4", "00:30 BC maintenance mingguan ke jam 4 ( kamis )", "00:45 slot harian",
-    "01:00 isi biaya pulsa / isi akuran ( senin subuh )", "01:30 isi data promo", "02:00 total depo",
-    "02:00 cek pl config", "03:30 Audit BCA", "03:45 First Register", "04:00 total depo", "05:00 cek phising",
-    "05:00 wd report", "05:00 Slot harian", "05:45 total depo"
+jadwal_malam = [
+    ("23:00", "SLOT harian"),
+    ("23:10", "BC Result Hongkong"),
+    ("23:30", "cek link & cek phising"),
+    ("23:30", "BC rtp slot jam 00.10"),
+    ("23:40", "depo harian"),
+    ("00:01", "update total bonus"),
+    ("00:05", "BC Result Toto Macau"),
+    ("00:30", "BC link alt jam 5"),
+    ("00:30", "BC bukti JP jam 4"),
+    ("00:30", "BC maintenance mingguan ke jam 4 ( kamis )"),
+    ("00:45", "slot harian"),
+    ("01:00", "isi biaya pulsa / isi akuran ( senin subuh )"),
+    ("01:30", "isi data promo"),
+    ("02:00", "total depo"),
+    ("02:00", "cek pl config"),
+    ("03:30", "Audit BCA"),
+    ("03:45", "First Register"),
+    ("04:00", "total depo"),
+    ("05:00", "cek phising"),
+    ("05:00", "wd report"),
+    ("05:00", "Slot harian"),
+    ("05:45", "total depo"),
 ]
 
-JADWAL_MAP = {
-    "pagi": JADWAL_PAGI,
-    "siang": JADWAL_SIANG,
-    "malam": JADWAL_MALAM,
-}
+active_schedule = None
+user_chat_id = None  # Simpel, simpan chat_id pengguna yang pilih jadwal, buat kirim pesan
 
-def main_menu_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("JADWAL PAGI", callback_data="jadwal_pagi")],
-        [InlineKeyboardButton("JADWAL SIANG", callback_data="jadwal_siang")],
-        [InlineKeyboardButton("JADWAL MALAM", callback_data="jadwal_malam")],
-        [InlineKeyboardButton("Reset Tugas Hari Ini", callback_data="reset_tugas")],
-    ])
-
-def jadwal_keyboard(jadwal_list, done_set):
-    buttons = []
-    for idx, item in enumerate(jadwal_list):
-        checked = "✅" if idx in done_set else "⬜"
-        buttons.append([InlineKeyboardButton(f"{checked} {item}", callback_data=f"toggle_done:{idx}")])
-    buttons.append([InlineKeyboardButton("🔙 Kembali", callback_data="back_to_menu")])
-    return InlineKeyboardMarkup(buttons)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global user_chat_id
+    user_chat_id = update.effective_chat.id
+
+    keyboard = [["pagi", "siang", "malam"], ["reset"]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text(
-        "Halo! Pilih jadwal yang ingin diaktifkan / dilihat:",
-        reply_markup=main_menu_keyboard()
+        "Halo! Silakan pilih jadwal yang ingin diaktifkan:\n(pagi / siang / malam)\nAtau ketik 'reset' untuk reset bot.",
+        reply_markup=reply_markup
     )
 
-async def reset_tugas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_data = context.chat_data
-    for key in ["done_pagi", "done_siang", "done_malam"]:
-        chat_data[key] = set()
-    await update.message.reply_text("✅ Semua tugas sudah direset. Siap digunakan kembali untuk hari berikutnya.")
 
-async def waktu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.datetime.now(TIMEZONE)
-    await update.message.reply_text(f"Waktu server sekarang:\n{now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global active_schedule, user_chat_id
+    user_chat_id = update.effective_chat.id
+    text = update.message.text.lower()
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    chat_data = context.chat_data
-    data = query.data
-
-    if data == "back_to_menu":
-        await query.edit_message_text("Pilih jadwal yang ingin diaktifkan / dilihat:", reply_markup=main_menu_keyboard())
+    if text == "reset":
+        active_schedule = None
+        await update.message.reply_text("Bot sudah di-reset. Silakan pilih jadwal lagi dengan /start.")
         return
 
-    if data == "reset_tugas":
-        for key in ["done_pagi", "done_siang", "done_malam"]:
-            chat_data[key] = set()
-        await query.edit_message_text("✅ Semua tugas sudah direset. Siap digunakan kembali untuk hari berikutnya.", reply_markup=main_menu_keyboard())
+    if text in ("pagi", "siang", "malam"):
+        active_schedule = text
+        await update.message.reply_text(f"Jadwal '{text}' telah diaktifkan.")
+    else:
+        await update.message.reply_text("Pilihan tidak valid. Ketik /start untuk memilih jadwal.")
+
+
+async def cek_jadwal(context: ContextTypes.DEFAULT_TYPE):
+    if not active_schedule or not user_chat_id:
+        return  # Tidak ada jadwal aktif / chat id
+
+    now = datetime.now(TZ).strftime("%H:%M")
+    jadwal = None
+
+    if active_schedule == "pagi":
+        jadwal = jadwal_pagi
+    elif active_schedule == "siang":
+        jadwal = jadwal_siang
+    elif active_schedule == "malam":
+        jadwal = jadwal_malam
+
+    if not jadwal:
         return
 
-    if data.startswith("jadwal_"):
-        jadwal_key = data.split("_")[1]
-        chat_data["active_jadwal"] = jadwal_key
-        done_set = chat_data.setdefault(f"done_{jadwal_key}", set())
-        jadwal_list = JADWAL_MAP[jadwal_key]
-        await query.edit_message_text(
-            f"JADWAL {jadwal_key.upper()}:\n\n" + "\n".join(
-                f"{'✅' if idx in done_set else '⬜'} {item}" for idx, item in enumerate(jadwal_list)
-            ),
-            reply_markup=jadwal_keyboard(jadwal_list, done_set)
-        )
-        return
+    for jam, kegiatan in jadwal:
+        if jam == now:
+            try:
+                await context.bot.send_message(chat_id=user_chat_id, text=f"🕒 {jam} - {kegiatan}")
+            except Exception as e:
+                logger.error(f"Error kirim pesan: {e}")
 
-    if data.startswith("toggle_done:"):
-        idx = int(data.split(":")[1])
-        jadwal_key = chat_data.get("active_jadwal")
-        if not jadwal_key:
-            await query.answer("Pilih jadwal dulu ya.", show_alert=True)
-            return
-        done_set = chat_data.setdefault(f"done_{jadwal_key}", set())
-        if idx in done_set:
-            done_set.remove(idx)
-        else:
-            done_set.add(idx)
-        jadwal_list = JADWAL_MAP[jadwal_key]
-        await query.edit_message_text(
-            f"JADWAL {jadwal_key.upper()}:\n\n" + "\n".join(
-                f"{'✅' if i in done_set else '⬜'} {it}" for i, it in enumerate(jadwal_list)
-            ),
-            reply_markup=jadwal_keyboard(jadwal_list, done_set)
-        )
-        return
 
-def parse_time_from_task(task_text):
-    # Extract HH and MM from string like "07:05 cek link pc indo"
-    try:
-        time_part = task_text.split()[0]
-        hh, mm = time_part.split(":")
-        return int(hh), int(mm)
-    except Exception as e:
-        logger.warning(f"Error parsing time from '{task_text}': {e}")
-        return None, None
-
-async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
-    job = context.job
-    chat_id = job.chat_id
-    jadwal_list = job.data.get("jadwal_list")
-    item_idx = job.data.get("item_idx")
-    task_text = jadwal_list[item_idx]
-
-    await context.bot.send_message(chat_id, f"⏰ Reminder: {task_text}")
-
-async def schedule_jobs(application):
-    # Hapus semua job lama dulu
-    for job in application.job_queue.get_jobs_by_name("reminder"):
-        job.schedule_removal()
-
-    # Untuk setiap chat yang punya aktif jadwal, schedule ulang
-    async with application.persistence_lock:
-        chat_data_all = application.persistence._dict.get("chat_data", {})
-        for chat_id_str, chat_data in chat_data_all.items():
-            chat_id = int(chat_id_str)
-            active_jadwal = chat_data.get("active_jadwal")
-            if not active_jadwal:
-                continue
-            done_set = chat_data.get(f"done_{active_jadwal}", set())
-            jadwal_list = JADWAL_MAP[active_jadwal]
-            now = datetime.datetime.now(TIMEZONE)
-            for idx, task in enumerate(jadwal_list):
-                if idx in done_set:
-                    continue
-                hh, mm = parse_time_from_task(task)
-                if hh is None:
-                    continue
-                # Set waktu reminder 5 menit sebelum jadwal (bisa diubah)
-                reminder_time = now.replace(hour=hh, minute=mm, second=0, microsecond=0) - datetime.timedelta(minutes=5)
-                if reminder_time < now:
-                    # kalau sudah lewat hari ini, skip
-                    continue
-                application.job_queue.run_once(
-                    send_reminder,
-                    when=(reminder_time - now).total_seconds(),
-                    chat_id=chat_id,
-                    name="reminder",
-                    data={"jadwal_list": jadwal_list, "item_idx": idx}
-                )
+async def webhook_handler(request: web.Request):
+    """Terima update dari Telegram via webhook."""
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
+    await application.update_queue.put(update)
+    return web.Response(text="ok")
 
 
 async def on_startup(app):
-    logger.info("Starting webhook server...")
-    # Schedule ulang semua job reminder setiap kali bot start
-    await schedule_jobs(app["bot_app"])
+    await application.bot.set_webhook(WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
+    logger.info(f"Webhook set at {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}")
 
-async def on_shutdown(app):
-    logger.info("Shutting down webhook server...")
-
-async def webhook_handler(request):
-    bot_app = request.app["bot_app"]
-    data = await request.json()
-    update = Update.de_json(data, bot_app.bot)
-    await bot_app.update_queue.put(update)
-    return web.Response(text="OK")
-
-async def daily_reset_job(context: ContextTypes.DEFAULT_TYPE):
-    # Reset semua done_set setiap hari jam 00:01
-    chat_data_all = context.application.persistence._dict.get("chat_data", {})
-    for chat_id_str, chat_data in chat_data_all.items():
-        for key in ["done_pagi", "done_siang", "done_malam"]:
-            chat_data[key] = set()
-    logger.info("Reset semua tugas harian berhasil.")
 
 async def main():
-    application = ApplicationBuilder()\
-        .token(TOKEN)\
-        .persistence(persistence)\
-        .build()
+    global application
+    application = ApplicationBuilder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("reset", reset_tugas))
-    application.add_handler(CommandHandler("waktu", waktu))
-    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    # Schedule reset harian jam 00:01
-    application.job_queue.run_daily(daily_reset_job, time=datetime.time(hour=0, minute=1, tzinfo=TIMEZONE))
+    # Job queue cek jadwal tiap menit
+    job_queue = application.job_queue
+    job_queue.run_repeating(cek_jadwal, interval=60, first=10)
 
-    # Jalankan webhook server aiohttp
+    # Setup aiohttp webserver untuk webhook
     app = web.Application()
-    app["bot_app"] = application
-    app.router.add_post(WEBHOOK_PATH, webhook_handler)
-
-    # Set webhook
-    await application.bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"Webhook set at {WEBHOOK_URL}")
+    app.router.add_post(WEBHOOK_URL_PATH, webhook_handler)
+    app.on_startup.append(on_startup)
 
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    logger.info(f"Server started at port {PORT}")
 
-    # Run bot sampai ctrl+c / termination
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()  # Optional fallback polling if webhook down
-    await application.updater.idle()
-    await application.stop()
-    await application.shutdown()
+    logger.info(f"Server started on port {PORT}")
+
+    while True:
+        await asyncio.sleep(3600)
+
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
