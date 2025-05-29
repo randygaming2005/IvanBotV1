@@ -153,8 +153,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_data = context.user_data
-    done_tasks = user_data.setdefault("done_tasks", set())
+    chat_data = context.chat_data
 
     data = query.data
 
@@ -165,8 +164,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "jadwal_pagi":
-        user_data["current_jadwal"] = "pagi"
-        done_set = user_data.setdefault("done_pagi", set())
+        chat_data["current_jadwal"] = "pagi"
+        done_set = chat_data.setdefault("done_pagi", set())
         await query.edit_message_text(
             "JADWAL PAGI:\n\n"
             + format_jadwal(JADWAL_PAGI, done_set),
@@ -175,8 +174,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "jadwal_siang":
-        user_data["current_jadwal"] = "siang"
-        done_set = user_data.setdefault("done_siang", set())
+        chat_data["current_jadwal"] = "siang"
+        done_set = chat_data.setdefault("done_siang", set())
         await query.edit_message_text(
             "JADWAL SIANG:\n\n"
             + format_jadwal(JADWAL_SIANG, done_set),
@@ -185,8 +184,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "jadwal_malam":
-        user_data["current_jadwal"] = "malam"
-        done_set = user_data.setdefault("done_malam", set())
+        chat_data["current_jadwal"] = "malam"
+        done_set = chat_data.setdefault("done_malam", set())
         await query.edit_message_text(
             "JADWAL MALAM:\n\n"
             + format_jadwal(JADWAL_MALAM, done_set),
@@ -202,13 +201,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Data tidak valid.", show_alert=True)
             return
 
-        current = user_data.get("current_jadwal")
+        current = chat_data.get("current_jadwal")
         if not current:
             await query.answer("Pilih jadwal dulu.", show_alert=True)
             return
 
         key = f"done_{current}"
-        done_set = user_data.setdefault(key, set())
+        done_set = chat_data.setdefault(key, set())
 
         if idx in done_set:
             done_set.remove(idx)
@@ -269,6 +268,66 @@ async def handle_webhook(request):
     return web.Response()
 
 
+def parse_time_from_task(task_str):
+    # Parse "HH:MM" from string like "07:00 cek phising"
+    try:
+        time_part = task_str.split()[0]
+        hour, minute = map(int, time_part.split(":"))
+        return hour, minute
+    except Exception:
+        return None
+
+
+async def send_reminder(application, session_name, task_idx, task_text):
+    chat_data_all = application.persistence.get_chat_data()
+    for chat_id_str, data in chat_data_all.items():
+        try:
+            chat_id = int(chat_id_str)
+        except ValueError:
+            continue
+
+        done_key = f"done_{session_name}"
+        done_set = data.get(done_key, set())
+
+        if task_idx not in done_set:
+            try:
+                await application.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"⏰ *Pengingat tugas {session_name.upper()}*\n"
+                        f"Tugas ke-{task_idx + 1}: {task_text}\n"
+                        f"(Pengingat 5 menit sebelum waktu tugas)"
+                    ),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logging.error(f"Gagal mengirim reminder ke chat {chat_id}: {e}")
+
+
+async def reminder_loop(application):
+    while True:
+        now = datetime.datetime.now(timezone)
+        now_plus_5 = now + datetime.timedelta(minutes=5)
+        target_hour = now_plus_5.hour
+        target_minute = now_plus_5.minute
+
+        schedules = {
+            "pagi": JADWAL_PAGI,
+            "siang": JADWAL_SIANG,
+            "malam": JADWAL_MALAM,
+        }
+
+        for session_name, tasks in schedules.items():
+            for idx, task in enumerate(tasks):
+                parsed_time = parse_time_from_task(task)
+                if parsed_time is None:
+                    continue
+                task_hour, task_minute = parsed_time
+                if task_hour == target_hour and task_minute == target_minute:
+                    await send_reminder(application, session_name, idx, task)
+        await asyncio.sleep(60)
+
+
 async def main():
     application = (
         ApplicationBuilder()
@@ -282,37 +341,37 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_error_handler(error_handler)
 
-    # aiohttp webserver setup
-    app = web.Application()
-    app["application"] = application
-    app.add_routes(
-        [
-            web.get("/", handle_root),
-            web.post(WEBHOOK_PATH, handle_webhook),
-        ]
+    # Run reminder_loop in background
+    application.job_queue.run_repeating(
+        lambda ctx: asyncio.create_task(reminder_loop(application)), interval=60, first=10
     )
 
-    if WEBHOOK_URL:
-        await application.bot.set_webhook(WEBHOOK_URL)
-        logging.info(f"Webhook set to {WEBHOOK_URL}")
+    # Webhook mode
+    if WEBHOOK_URL_BASE:
+        app = web.Application()
+        app["application"] = application
+        app.router.add_get("/", handle_root)
+        app.router.add_post(WEBHOOK_PATH, handle_webhook)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 3000)))
+        await site.start()
+
+        print("Webhook server started")
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+        await application.updater.idle()
     else:
-        logging.warning("WEBHOOK_URL_BASE environment variable not set, webhook disabled!")
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-
-    port = int(os.environ.get("PORT", 8000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    logging.info(f"Webserver started on port {port}")
-
-    await application.initialize()
-    await application.start()
-
-    # Keep running forever
-    while True:
-        await asyncio.sleep(3600)
+        # Polling mode (local testing)
+        await application.initialize()
+        await application.start()
+        print("Bot started (polling mode)")
+        await application.updater.start_polling()
+        await application.updater.idle()
 
 
 if __name__ == "__main__":
+    import asyncio
+
     asyncio.run(main())
