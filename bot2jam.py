@@ -178,5 +178,4 @@ async def schedule_reminders(application):
 
                 job_name = f"reminder_{chat_id}_{jadwal_key}_{idx}"
                 existing_jobs = application.job_queue
-::contentReference[oaicite:16]{index=16}
  
