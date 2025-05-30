@@ -139,29 +139,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
     elif update.callback_query:
-        await update.callback_query.answer()  # <-- Ini yang ditambahkan
         await update.callback_query.edit_message_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
 
 async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    section = query.data.split("_", 1)[1]
+    section = query.data.split("_")[1]
     chat_id = query.message.chat.id
-
-    if section == "menu":
-        # Tampilkan menu utama kembali
-        keyboard = [
-            [InlineKeyboardButton("Pagi", callback_data="section_Pagi")],
-            [InlineKeyboardButton("Siang", callback_data="section_Siang")],
-            [InlineKeyboardButton("Malam", callback_data="section_Malam")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
-        return
-
-    if section not in REMINDER_SECTIONS:
-        await query.edit_message_text("⚠️ Bagian jadwal tidak ditemukan.")
-        return
 
     completed = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
 
@@ -198,7 +182,7 @@ async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 job.schedule_removal()
                 user_jobs[chat_id].remove(job)
 
-    context.bot_data.get("active_sections", {}).get(chat_id, {}).pop(section, None)
+    context.bot_data["active_sections"][chat_id].pop(section, None)
     await query.edit_message_text(f"❌ Pengingat untuk bagian *{section}* telah dihentikan.", parse_mode='Markdown')
 
 async def mark_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -216,62 +200,86 @@ async def mark_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await section_handler(update, context)
 
 async def schedule_section_reminders(application, chat_id, section, thread_id=None):
-    # Hapus job lama
-    if chat_id in user_jobs:
-        for job in user_jobs[chat_id][:]:
-            if job.data.get("section") == section:
-                job.schedule_removal()
-                user_jobs[chat_id].remove(job)
+    if chat_id not in user_jobs:
+        user_jobs[chat_id] = []
 
-    user_jobs.setdefault(chat_id, [])
-
-    for hour, minute, msg in REMINDER_SECTIONS[section]:
-        now = datetime.datetime.now(tz=timezone)
-        reminder_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-
-        if reminder_time < now:
-            reminder_time += datetime.timedelta(days=1)
-
-        delta = (reminder_time - now).total_seconds()
-
-        job = application.job_queue.run_once(
+    for h, m, msg in REMINDER_SECTIONS[section]:
+        waktu = datetime.time(hour=h, minute=m, tzinfo=timezone)
+        job = application.job_queue.run_daily(
             reminder,
-            delta,
-            data={"chat_id": chat_id, "message": msg, "section": section, "thread_id": thread_id},
-            name=f"{chat_id}_{section}_{msg}",
+            time=waktu,
+            chat_id=chat_id,
+            name=f"reminder_{chat_id}_{section}_{h:02d}{m:02d}",
+            data={"chat_id": chat_id, "message": msg, "section": section, "thread_id": thread_id}
         )
         user_jobs[chat_id].append(job)
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logging.error("❗ Exception occurred:", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_chat:
+        try:
+            await context.bot.send_message(update.effective_chat.id, text="⚠️ Terjadi kesalahan. Silakan coba lagi nanti.")
+        except Exception:
+            pass
+
+async def start_jobqueue(app):
+    await app.job_queue.start()
+
+async def handle_root(request):
+    return web.Response(text="Bot is running")
+
+async def handle_webhook(request):
+    application = request.app["application"]
+    update = await request.json()
+    from telegram import Update as TgUpdate
+    tg_update = TgUpdate.de_json(update, application.bot)
+    await application.update_queue.put(tg_update)
+    return web.Response()
 
 async def main():
     application = (
         ApplicationBuilder()
         .token(TOKEN)
         .persistence(persistence)
+        .post_init(start_jobqueue)
         .build()
     )
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(section_handler, pattern=r"^section_"))
-    application.add_handler(CallbackQueryHandler(activate_section, pattern=r"^activate_"))
-    application.add_handler(CallbackQueryHandler(reset_section, pattern=r"^reset_"))
-    application.add_handler(CallbackQueryHandler(mark_done, pattern=r"^done_"))
+    application.add_handler(CallbackQueryHandler(section_handler, pattern="^section_"))
+    application.add_handler(CallbackQueryHandler(activate_section, pattern="^activate_"))
+    application.add_handler(CallbackQueryHandler(reset_section, pattern="^reset_"))
+    application.add_handler(CallbackQueryHandler(mark_done, pattern="^done_"))
 
-    if WEBHOOK_URL_BASE:
-        # Webhook mode
+    async def section_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await start(update, context)
+
+    application.add_handler(CallbackQueryHandler(section_menu, pattern="^section_menu$"))
+    application.add_error_handler(error_handler)
+
+    app = web.Application()
+    app["application"] = application
+    app.add_routes([
+        web.get("/", handle_root),
+        web.post(WEBHOOK_PATH, handle_webhook),
+    ])
+
+    if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
-        runner = web.AppRunner(app)
-await runner.setup()
-port = int(os.environ.get("PORT", 8000))
-site = web.TCPSite(runner, "0.0.0.0", port)
-await site.start()
-        print("Bot started in webhook mode")
-        while True:
-            await asyncio.sleep(3600)
     else:
-        # Polling mode
-        print("Bot started in polling mode")
-        await application.run_polling()
+        logging.warning("⚠️ WEBHOOK_URL_BASE environment variable tidak diset, webhook tidak aktif!")
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    await application.initialize()
+    await application.start()
+
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
