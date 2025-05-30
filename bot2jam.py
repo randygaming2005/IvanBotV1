@@ -8,12 +8,11 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    ContextTypes,
     CallbackQueryHandler,
+    ContextTypes,
     PicklePersistence,
 )
 
-# Setup logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -21,165 +20,187 @@ logging.basicConfig(
 
 TOKEN = os.environ.get("TOKEN") or "YOUR_BOT_TOKEN_HERE"
 WEBHOOK_PATH = f"/{TOKEN}"
-WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE")  # ex: https://yourapp.onrender.com
+WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE")
 WEBHOOK_URL = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}" if WEBHOOK_URL_BASE else None
 
 persistence = PicklePersistence(filepath="reminder_data.pkl")
-user_jobs = {}  # Simpan job per chat
-active_sections = {}  # Simpan status aktif dari kategori per chat
+user_jobs = {}
 timezone = pytz.timezone("Asia/Jakarta")
+user_active_sections = {}
 
-# Jadwal pengingat otomatis: (jam, menit, pesan, kategori)
-reminder_schedule = [
-    (7, 5, "07:05 cek link pc indo", "pagi"),
-    (7, 0, "07:00 cek phising", "pagi"),
-    (7, 5, "07:05 cek dana PGA BL", "pagi"),
-    (7, 15, "07:15 req dana PGA", "pagi"),
-    (7, 30, "07:30 paito berita", "pagi"),
-    (8, 0, "08:00 total depo", "pagi"),
-    (8, 0, "08:00 Slot Harian", "pagi"),
-    (8, 0, "08:00 jadwalkan bukti jp ke jam 10.00", "pagi"),
-    (8, 10, "08:10 BC link alternatif ke jam 12.00", "pagi"),
-    (9, 0, "09:00 jowo pools", "pagi"),
-    (9, 10, "09:10 TO semua pasaran", "pagi"),
-    (9, 30, "09:30 Audit BCA", "pagi"),
-    (9, 45, "09:45 First Register", "pagi"),
-    (10, 0, "10:00 BC maintenance done (kamis)", "pagi"),
-    (10, 0, "10:00 cek data selisih", "pagi"),
-    (10, 0, "10:00 total depo", "pagi"),
-    (10, 30, "10:30 isi data bola (> jam 1)", "pagi"),
-    (11, 0, "11:00 bc maintenance WL (selasa)", "pagi"),
-    (11, 0, "11:00 bc jadwal bola", "pagi"),
-    (12, 0, "12:00 total depo", "pagi"),
-    (12, 0, "12:00 slot & rng mingguan", "pagi"),
-    (12, 50, "12:50 live ttm", "pagi"),
-    (12, 30, "12:30 cek phising", "pagi"),
-    (13, 0, "13:00 wd report", "pagi"),
-    (13, 0, "13:00 BC Result Toto Macau", "pagi"),
-    (13, 30, "13:30 slot & rng harian", "pagi"),
-    (14, 0, "14:00 BC Result Sydney", "pagi"),
-    (14, 0, "14:00 depo harian", "pagi"),
-
-    (15, 30, "15:30 cek link", "siang"),
-    (16, 0, "16:00 cek phising", "siang"),
-    (16, 0, "16:00 deposit harian", "siang"),
-    (16, 30, "16:30 jadwalkan bukti jp ke jam 17.00", "siang"),
-    (16, 0, "16:00 isi data selisih", "siang"),
-    (16, 0, "16:00 BC Result Toto Macau", "siang"),
-    (17, 40, "17:40 SLOT harian (kalau tidak ada sgp jam 18.30)", "siang"),
-    (17, 50, "17:50 BC Result Singapore", "siang"),
-    (18, 0, "18:00 5 lucky ball", "siang"),
-    (18, 0, "18:00 deposit harian", "siang"),
-    (18, 5, "18:05 BC link alt ke jam 19.00", "siang"),
-    (18, 10, "18:10 isi data wlb2c", "siang"),
-    (19, 0, "19:00 BC Result Toto Macau", "siang"),
-    (19, 30, "19:30 Audit BCA", "siang"),
-    (19, 45, "19:45 First Register", "siang"),
-    (20, 0, "20:00 deposit harian", "siang"),
-    (21, 0, "21:00 jowo pools", "siang"),
-    (21, 0, "21:00 cek phising", "siang"),
-    (21, 0, "21:00 wd report", "siang"),
-    (22, 0, "22:00 BC Result Toto Macau", "siang"),
-    (22, 0, "22:00 deposit harian", "siang"),
-    (22, 45, "22:45 Slot harian", "siang"),
-
-    (23, 0, "23:00 SLOT harian", "malam"),
-    (23, 10, "23:10 BC Result Hongkong", "malam"),
-    (23, 30, "23:30 cek link & cek phising", "malam"),
-    (23, 30, "23:30 BC rtp slot jam 00.10", "malam"),
-    (23, 40, "23:40 depo harian", "malam"),
-    (0, 5, "00:05 BC Result Toto Macau", "malam"),
-    (0, 1, "00:01 update total bonus", "malam"),
-    (0, 30, "00:30 BC link alt jam 5", "malam"),
-    (0, 30, "00:30 BC bukti JP jam 4", "malam"),
-    (0, 30, "00:30 BC maintenance mingguan ke jam 4 (kamis)", "malam"),
-    (0, 45, "00:45 slot harian", "malam"),
-    (1, 0, "01:00 isi biaya pulsa / isi akuran (senin subuh)", "malam"),
-    (1, 30, "01:30 isi data promo", "malam"),
-    (2, 0, "02:00 total depo", "malam"),
-    (2, 0, "02:00 cek pl config", "malam"),
-    (3, 30, "03:30 Audit BCA", "malam"),
-    (3, 45, "03:45 First Register", "malam"),
-    (4, 0, "04:00 total depo", "malam"),
-    (5, 0, "05:00 cek phising", "malam"),
-    (5, 0, "05:00 wd report", "malam"),
-    (5, 0, "05:00 Slot harian", "malam"),
-    (5, 45, "05:45 total depo", "malam"),
-]
+REMINDER_SECTIONS = {
+    "Pagi": [
+        (7, 5, "07:05 cek link pc indo"),
+        (7, 0, "07:00 cek phising"),
+        (7, 5, "07:05 cek dana PGA BL"),
+        (7, 15, "07:15 req dana PGA"),
+        (7, 30, "07:30 paito berita"),
+        (8, 0, "08:00 total depo"),
+        (8, 0, "08:00 Slot Harian"),
+        (8, 0, "08:00 jadwalkan bukti jp ke jam 10.00"),
+        (8, 10, "08:10 BC link alternatif ke jam 12.00"),
+        (9, 0, "09:00 jowo pools"),
+        (9, 10, "09:10 TO semua pasaran"),
+        (9, 30, "09:30 Audit BCA"),
+        (9, 45, "09:45 First Register"),
+        (10, 0, "10:00 BC maintenance done (kamis)"),
+        (10, 0, "10:00 cek data selisih"),
+        (10, 0, "10:00 total depo"),
+        (10, 30, "10:30 isi data bola (> jam 1)"),
+        (11, 0, "11:00 bc maintenance WL (selasa)"),
+        (11, 0, "11:00 bc jadwal bola"),
+        (12, 0, "12:00 total depo"),
+        (12, 0, "12:00 slot & rng mingguan"),
+        (12, 50, "12:50 live ttm"),
+        (12, 30, "12:30 cek phising"),
+        (13, 0, "13:00 wd report"),
+        (13, 0, "13:00 BC Result Toto Macau"),
+        (13, 30, "13:30 slot & rng harian"),
+        (14, 0, "14:00 BC Result Sydney"),
+        (14, 0, "14:00 depo harian"),
+    ],
+    "Siang": [
+        (15, 30, "15:30 cek link"),
+        (16, 0, "16:00 cek phising"),
+        (16, 0, "16:00 deposit harian"),
+        (16, 30, "16:30 jadwalkan bukti jp ke jam 17.00"),
+        (16, 0, "16:00 isi data selisih"),
+        (16, 0, "16:00 BC Result Toto Macau"),
+        (17, 40, "17:40 SLOT harian (kalau tidak ada sgp jam 18.30)"),
+        (17, 50, "17:50 BC Result Singapore"),
+        (18, 0, "18:00 5 lucky ball"),
+        (18, 0, "18:00 deposit harian"),
+        (18, 5, "18:05 BC link alt ke jam 19.00"),
+        (18, 10, "18:10 isi data wlb2c"),
+        (19, 0, "19:00 BC Result Toto Macau"),
+        (19, 30, "19:30 Audit BCA"),
+        (19, 45, "19:45 First Register"),
+        (20, 0, "20:00 deposit harian"),
+        (21, 0, "21:00 jowo pools"),
+        (21, 0, "21:00 cek phising"),
+        (21, 0, "21:00 wd report"),
+        (22, 0, "22:00 BC Result Toto Macau"),
+        (22, 0, "22:00 deposit harian"),
+        (22, 45, "22:45 Slot harian"),
+    ],
+    "Malam": [
+        (23, 0, "23:00 SLOT harian"),
+        (23, 10, "23:10 BC Result Hongkong"),
+        (23, 30, "23:30 cek link & cek phising"),
+        (23, 30, "23:30 BC rtp slot jam 00.10"),
+        (23, 40, "23:40 depo harian"),
+        (0, 5, "00:05 BC Result Toto Macau"),
+        (0, 1, "00:01 update total bonus"),
+        (0, 30, "00:30 BC link alt jam 5"),
+        (0, 30, "00:30 BC bukti JP jam 4"),
+        (0, 30, "00:30 BC maintenance mingguan ke jam 4 (kamis)"),
+        (0, 45, "00:45 slot harian"),
+        (1, 0, "01:00 isi biaya pulsa / isi akuran (senin subuh)"),
+        (1, 30, "01:30 isi data promo"),
+        (2, 0, "02:00 total depo"),
+        (2, 0, "02:00 cek pl config"),
+        (3, 30, "03:30 Audit BCA"),
+        (3, 45, "03:45 First Register"),
+        (4, 0, "04:00 total depo"),
+        (5, 0, "05:00 cek phising"),
+        (5, 0, "05:00 wd report"),
+        (5, 0, "05:00 Slot harian"),
+        (5, 45, "05:45 total depo"),
+    ],
+}
 
 async def reminder(context: ContextTypes.DEFAULT_TYPE):
     data = context.job.data
     chat_id = data["chat_id"]
     message = data["message"]
+    section = data["section"]
     thread_id = data.get("thread_id")
-    await context.bot.send_message(chat_id=chat_id, message_thread_id=thread_id, text=f"🔔 {message}")
 
-def get_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌅 Pagi", callback_data="pagi"),
-         InlineKeyboardButton("🏙️ Siang", callback_data="siang"),
-         InlineKeyboardButton("🌃 Malam", callback_data="malam")]
-    ])
+    if not user_active_sections.get(chat_id, {}).get(section):
+        return
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        message_thread_id=thread_id,
+        text=f"🔔 {message}"
+    )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Pilih waktu jadwal yang ingin kamu aktifkan:", reply_markup=get_keyboard())
+    chat_id = update.effective_chat.id
+    thread_id = update.message.message_thread_id
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    section = query.data
-    chat_id = query.message.chat.id
-    thread_id = query.message.message_thread_id
-    buttons = [
-        [InlineKeyboardButton("✅ Aktifkan", callback_data=f"aktif_{section}"),
-         InlineKeyboardButton("❌ Reset", callback_data=f"reset_{section}")]
+    keyboard = [
+        [InlineKeyboardButton("Pagi", callback_data="section_Pagi")],
+        [InlineKeyboardButton("Siang", callback_data="section_Siang")],
+        [InlineKeyboardButton("Malam", callback_data="section_Malam")],
     ]
-    items = [f"{h:02d}:{m:02d} - {msg}" for h, m, msg, cat in reminder_schedule if cat == section]
-    text = f"📋 Jadwal {section}:
-" + "\n".join(items)
-    markup = InlineKeyboardMarkup(buttons)
-    await query.edit_message_text(text, reply_markup=markup)
 
-async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
+
+async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    action, section = query.data.split("_")
+
+    section = query.data.split("_")[1]
     chat_id = query.message.chat.id
-    thread_id = query.message.message_thread_id
 
-    if action == "aktif":
-        await schedule_section_reminders(context.application, chat_id, section, thread_id)
-        await query.edit_message_text(f"✅ Jadwal {section} diaktifkan.")
-    elif action == "reset":
-        reset_section_reminders(chat_id, section)
-        await query.edit_message_text(f"❌ Jadwal {section} dihentikan.")
+    keyboard = [
+        [InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")],
+    ]
 
-async def schedule_section_reminders(application, chat_id, section, thread_id):
-    key = f"{chat_id}_{section}"
-    if key in user_jobs:
-        for job in user_jobs[key]:
-            job.schedule_removal()
-    jobs = []
-    for h, m, msg, cat in reminder_schedule:
-        if cat != section:
-            continue
+    for h, m, msg in REMINDER_SECTIONS[section]:
+        keyboard.append([InlineKeyboardButton(f"{h:02d}:{m:02d} - {msg}", callback_data="noop")])
+
+    keyboard.append([InlineKeyboardButton("❌ Reset", callback_data=f"reset_{section}")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = f"📋 Jadwal {section}:
+"
+    await query.edit_message_text(text=text, reply_markup=reply_markup)
+
+async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    section = query.data.split("_")[1]
+    chat_id = query.message.chat.id
+
+    if chat_id not in user_active_sections:
+        user_active_sections[chat_id] = {}
+
+    user_active_sections[chat_id][section] = True
+    await schedule_section_reminders(context.application, chat_id, section)
+    await query.edit_message_text(f"✅ Pengingat untuk bagian *{section}* telah diaktifkan.", parse_mode='Markdown')
+
+async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    section = query.data.split("_")[1]
+    chat_id = query.message.chat.id
+
+    if chat_id in user_jobs:
+        for job in user_jobs[chat_id]:
+            if job.data.get("section") == section:
+                job.schedule_removal()
+        user_jobs[chat_id] = [job for job in user_jobs[chat_id] if job.data.get("section") != section]
+
+    user_active_sections.get(chat_id, {}).pop(section, None)
+    await query.edit_message_text(f"❌ Pengingat untuk bagian *{section}* telah dihentikan.", parse_mode='Markdown')
+
+async def schedule_section_reminders(application, chat_id, section, thread_id=None):
+    if chat_id not in user_jobs:
+        user_jobs[chat_id] = []
+
+    for h, m, msg in REMINDER_SECTIONS[section]:
         waktu = datetime.time(hour=h, minute=m, tzinfo=timezone)
         job = application.job_queue.run_daily(
             reminder,
             time=waktu,
             chat_id=chat_id,
-            name=f"reminder_{key}_{h:02d}{m:02d}",
-            data={"chat_id": chat_id, "message": msg, "thread_id": thread_id}
+            name=f"reminder_{chat_id}_{section}_{h:02d}{m:02d}",
+            data={"chat_id": chat_id, "message": msg, "section": section, "thread_id": thread_id}
         )
-        jobs.append(job)
-    user_jobs[key] = jobs
-
-def reset_section_reminders(chat_id, section):
-    key = f"{chat_id}_{section}"
-    if key in user_jobs:
-        for job in user_jobs[key]:
-            job.schedule_removal()
-        del user_jobs[key]
+        user_jobs[chat_id].append(job)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logging.error("❗ Exception occurred:", exc_info=context.error)
@@ -191,7 +212,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_jobqueue(app):
     await app.job_queue.start()
-    logging.info("✅ JobQueue dimulai.")
 
 async def handle_root(request):
     return web.Response(text="Bot is running")
@@ -214,8 +234,9 @@ async def main():
     )
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(handle_callback, pattern="^(pagi|siang|malam)$"))
-    application.add_handler(CallbackQueryHandler(handle_action, pattern="^(aktif|reset)_(pagi|siang|malam)$"))
+    application.add_handler(CallbackQueryHandler(section_handler, pattern="^section_"))
+    application.add_handler(CallbackQueryHandler(activate_section, pattern="^activate_"))
+    application.add_handler(CallbackQueryHandler(reset_section, pattern="^reset_"))
     application.add_error_handler(error_handler)
 
     app = web.Application()
@@ -227,7 +248,6 @@ async def main():
 
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
-        logging.info(f"🌐 Webhook diset ke {WEBHOOK_URL}")
     else:
         logging.warning("⚠️ WEBHOOK_URL_BASE environment variable tidak diset, webhook tidak aktif!")
 
@@ -236,7 +256,6 @@ async def main():
     port = int(os.environ.get("PORT", 8000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logging.info(f"🌐 Webserver berjalan di port {port}")
 
     await application.initialize()
     await application.start()
