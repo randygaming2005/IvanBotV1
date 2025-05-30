@@ -136,7 +136,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Malam", callback_data="section_Malam")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
+    if update.message:
+        await update.message.reply_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
+    elif update.callback_query:
+        await update.callback_query.edit_message_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
 
 async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -146,15 +149,13 @@ async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     completed = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
 
-    keyboard = [
-        [InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")]
-    ]
-
+    keyboard = [[InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")]]
     for h, m, msg in REMINDER_SECTIONS[section]:
         status = "✅" if msg in completed else "❌"
         keyboard.append([InlineKeyboardButton(f"{status} {h:02d}:{m:02d} - {msg}", callback_data=f"done_{section}_{msg}")])
 
     keyboard.append([InlineKeyboardButton("❌ Reset", callback_data=f"reset_{section}")])
+    keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="section_menu")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(f"📋 Jadwal {section}:", reply_markup=reply_markup)
@@ -165,13 +166,7 @@ async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     section = query.data.split("_")[1]
     chat_id = query.message.chat.id
 
-    if "active_sections" not in context.bot_data:
-        context.bot_data["active_sections"] = {}
-
-    if chat_id not in context.bot_data["active_sections"]:
-        context.bot_data["active_sections"][chat_id] = {}
-
-    context.bot_data["active_sections"][chat_id][section] = True
+    context.bot_data.setdefault("active_sections", {}).setdefault(chat_id, {})[section] = True
     await schedule_section_reminders(context.application, chat_id, section)
     await query.edit_message_text(f"✅ Pengingat untuk bagian *{section}* telah diaktifkan.", parse_mode='Markdown')
 
@@ -195,13 +190,13 @@ async def mark_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, section, msg = query.data.split("_", 2)
     chat_id = query.message.chat.id
 
-    if "completed_tasks" not in context.bot_data:
-        context.bot_data["completed_tasks"] = {}
+    completed_tasks = context.bot_data.setdefault("completed_tasks", {}).setdefault(chat_id, set())
 
-    if chat_id not in context.bot_data["completed_tasks"]:
-        context.bot_data["completed_tasks"][chat_id] = set()
+    if msg in completed_tasks:
+        completed_tasks.remove(msg)
+    else:
+        completed_tasks.add(msg)
 
-    context.bot_data["completed_tasks"][chat_id].add(msg)
     await section_handler(update, context)
 
 async def schedule_section_reminders(application, chat_id, section, thread_id=None):
@@ -255,6 +250,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(activate_section, pattern="^activate_"))
     application.add_handler(CallbackQueryHandler(reset_section, pattern="^reset_"))
     application.add_handler(CallbackQueryHandler(mark_done, pattern="^done_"))
+    application.add_handler(CallbackQueryHandler(start, pattern="^section_menu$"))
     application.add_error_handler(error_handler)
 
     app = web.Application()
