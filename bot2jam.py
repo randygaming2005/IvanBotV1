@@ -126,7 +126,7 @@ async def reminder(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=chat_id,
         message_thread_id=thread_id,
-        text=f"\ud83d\udd14 {message}"
+        text=f"\u{1F514} {message}"
     )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -137,9 +137,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.message:
-        await update.message.reply_text("\ud83d\udd52 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
+        await update.message.reply_text("\u{1F552} Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
     elif update.callback_query:
-        await update.callback_query.edit_message_text("\ud83d\udd52 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
+        await update.callback_query.edit_message_text("\u{1F552} Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
 
 async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -155,10 +155,10 @@ async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton(f"{status} {h:02d}:{m:02d} - {msg}", callback_data=f"done_{section}_{msg}")])
 
     keyboard.append([InlineKeyboardButton("\u274c Reset", callback_data=f"reset_{section}")])
-    keyboard.append([InlineKeyboardButton("\ud83d\udd19 Kembali", callback_data="section_menu")])
+    keyboard.append([InlineKeyboardButton("\u{1F519} Kembali", callback_data="section_menu")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"\ud83d\udccb Jadwal {section}:", reply_markup=reply_markup)
+    await query.edit_message_text(f"\u{1F4CB} Jadwal {section}:", reply_markup=reply_markup)
 
 async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -234,7 +234,7 @@ async def handle_webhook(request):
     from telegram import Update as TgUpdate
     tg_update = TgUpdate.de_json(update, application.bot)
     await application.update_queue.put(tg_update)
-    return web.Response()
+    return web.Response(text="ok")
 
 async def main():
     application = (
@@ -266,6 +266,7 @@ async def main():
 
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
+        logging.info(f"Webhook di-set ke {WEBHOOK_URL}")
     else:
         logging.warning("\u26a0\ufe0f WEBHOOK_URL_BASE environment variable tidak diset, webhook tidak aktif!")
 
@@ -277,6 +278,8 @@ async def main():
 
     await application.initialize()
     await application.start()
+
+    logging.info(f"Server webhook berjalan di port {port}")
 
     while True:
         await asyncio.sleep(3600)
