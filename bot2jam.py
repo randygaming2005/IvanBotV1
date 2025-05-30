@@ -139,6 +139,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
     elif update.callback_query:
+        await update.callback_query.answer()  # <-- Ini yang ditambahkan
         await update.callback_query.edit_message_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
 
 async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
