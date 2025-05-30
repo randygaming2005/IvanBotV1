@@ -26,7 +26,11 @@ WEBHOOK_URL = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}" if WEBHOOK_URL_BASE else None
 persistence = PicklePersistence(filepath="reminder_data.pkl")
 user_jobs = {}
 timezone = pytz.timezone("Asia/Jakarta")
-user_active_sections = {}
+user_active_sections = persistence.get("active_sections") or {}
+user_completed_tasks = persistence.get("completed_tasks") or {}
+
+def save_completed_tasks():
+    persistence.update("completed_tasks", user_completed_tasks)
 
 REMINDER_SECTIONS = {
     "Pagi": [
@@ -115,8 +119,17 @@ async def reminder(context: ContextTypes.DEFAULT_TYPE):
     message = data["message"]
     section = data["section"]
     thread_id = data.get("thread_id")
+    hour = data["hour"]
+    minute = data["minute"]
 
     if not user_active_sections.get(chat_id, {}).get(section):
+        return
+
+    if (
+        chat_id in user_completed_tasks and
+        section in user_completed_tasks[chat_id] and
+        (hour, minute) in user_completed_tasks[chat_id][section]
+    ):
         return
 
     await context.bot.send_message(
@@ -134,7 +147,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Siang", callback_data="section_Siang")],
         [InlineKeyboardButton("Malam", callback_data="section_Malam")],
     ]
-
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
 
@@ -149,14 +161,18 @@ async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")],
     ]
 
+    completed = user_completed_tasks.get(chat_id, {}).get(section, set())
     for h, m, msg in REMINDER_SECTIONS[section]:
-        keyboard.append([InlineKeyboardButton(f"{h:02d}:{m:02d} - {msg}", callback_data="noop")])
+        label = f"{h:02d}:{m:02d} - {msg}"
+        status = "✅" if (h, m) in completed else "❌"
+        keyboard.append([
+            InlineKeyboardButton(f"{status} {label}", callback_data=f"toggle_{section}_{h}_{m}")
+        ])
 
     keyboard.append([InlineKeyboardButton("❌ Reset", callback_data=f"reset_{section}")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    text = f"📋 Jadwal {section}:\n"
-    await query.edit_message_text(text=text, reply_markup=reply_markup)
+    await query.edit_message_text(text=f"📋 Jadwal {section}:", reply_markup=reply_markup)
 
 async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -168,6 +184,8 @@ async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_active_sections[chat_id] = {}
 
     user_active_sections[chat_id][section] = True
+    persistence.update("active_sections", user_active_sections)
+
     await schedule_section_reminders(context.application, chat_id, section)
     await query.edit_message_text(f"✅ Pengingat untuk bagian *{section}* telah diaktifkan.", parse_mode='Markdown')
 
@@ -178,14 +196,38 @@ async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.message.chat.id
 
     if chat_id in user_jobs:
-        # gunakan salinan list supaya aman saat hapus job saat iterasi
         for job in user_jobs[chat_id][:]:
             if job.data.get("section") == section:
                 job.schedule_removal()
                 user_jobs[chat_id].remove(job)
 
     user_active_sections.get(chat_id, {}).pop(section, None)
+    user_completed_tasks.get(chat_id, {}).pop(section, None)
+    persistence.update("active_sections", user_active_sections)
+    save_completed_tasks()
+
     await query.edit_message_text(f"❌ Pengingat untuk bagian *{section}* telah dihentikan.", parse_mode='Markdown')
+
+async def toggle_task_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    chat_id = query.message.chat.id
+    _, section, h, m = query.data.split("_")
+    h, m = int(h), int(m)
+
+    if chat_id not in user_completed_tasks:
+        user_completed_tasks[chat_id] = {}
+    if section not in user_completed_tasks[chat_id]:
+        user_completed_tasks[chat_id][section] = set()
+
+    if (h, m) in user_completed_tasks[chat_id][section]:
+        user_completed_tasks[chat_id][section].remove((h, m))
+    else:
+        user_completed_tasks[chat_id][section].add((h, m))
+
+    save_completed_tasks()
+    await section_handler(update, context)
 
 async def schedule_section_reminders(application, chat_id, section, thread_id=None):
     if chat_id not in user_jobs:
@@ -198,7 +240,7 @@ async def schedule_section_reminders(application, chat_id, section, thread_id=No
             time=waktu,
             chat_id=chat_id,
             name=f"reminder_{chat_id}_{section}_{h:02d}{m:02d}",
-            data={"chat_id": chat_id, "message": msg, "section": section, "thread_id": thread_id}
+            data={"chat_id": chat_id, "message": msg, "section": section, "thread_id": thread_id, "hour": h, "minute": m}
         )
         user_jobs[chat_id].append(job)
 
@@ -237,6 +279,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(section_handler, pattern="^section_"))
     application.add_handler(CallbackQueryHandler(activate_section, pattern="^activate_"))
     application.add_handler(CallbackQueryHandler(reset_section, pattern="^reset_"))
+    application.add_handler(CallbackQueryHandler(toggle_task_status, pattern="^toggle_"))
     application.add_error_handler(error_handler)
 
     app = web.Application()
