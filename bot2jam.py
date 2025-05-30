@@ -115,18 +115,18 @@ async def reminder(context: ContextTypes.DEFAULT_TYPE):
     section = data["section"]
     thread_id = data.get("thread_id")
 
-    completed_tasks = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
+    completed_tasks = context.chat_data.get("completed_tasks", set())
     if message in completed_tasks:
         return
 
-    active_sections = context.bot_data.get("active_sections", {}).get(chat_id, {})
+    active_sections = context.chat_data.get("active_sections", {})
     if not active_sections.get(section):
         return
 
     await context.bot.send_message(
         chat_id=chat_id,
         message_thread_id=thread_id,
-        text=f"🔔 {message}"
+        text=f"\ud83d\udd14 {message}"
     )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -137,9 +137,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.message:
-        await update.message.reply_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
+        await update.message.reply_text("\ud83d\udd52 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
     elif update.callback_query:
-        await update.callback_query.edit_message_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
+        await update.callback_query.edit_message_text("\ud83d\udd52 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
 
 async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -147,18 +147,18 @@ async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     section = query.data.split("_")[1]
     chat_id = query.message.chat.id
 
-    completed = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
+    completed = context.chat_data.get("completed_tasks", set())
 
-    keyboard = [[InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")]]
+    keyboard = [[InlineKeyboardButton("\u2705 Aktifkan", callback_data=f"activate_{section}")]]
     for h, m, msg in REMINDER_SECTIONS[section]:
-        status = "✅" if msg in completed else "❌"
+        status = "\u2705" if msg in completed else "\u274c"
         keyboard.append([InlineKeyboardButton(f"{status} {h:02d}:{m:02d} - {msg}", callback_data=f"done_{section}_{msg}")])
 
-    keyboard.append([InlineKeyboardButton("❌ Reset", callback_data=f"reset_{section}")])
-    keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="section_menu")])
+    keyboard.append([InlineKeyboardButton("\u274c Reset", callback_data=f"reset_{section}")])
+    keyboard.append([InlineKeyboardButton("\ud83d\udd19 Kembali", callback_data="section_menu")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"📋 Jadwal {section}:", reply_markup=reply_markup)
+    await query.edit_message_text(f"\ud83d\udccb Jadwal {section}:", reply_markup=reply_markup)
 
 async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -166,9 +166,9 @@ async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     section = query.data.split("_")[1]
     chat_id = query.message.chat.id
 
-    context.bot_data.setdefault("active_sections", {}).setdefault(chat_id, {})[section] = True
+    context.chat_data.setdefault("active_sections", {})[section] = True
     await schedule_section_reminders(context.application, chat_id, section)
-    await query.edit_message_text(f"✅ Pengingat untuk bagian *{section}* telah diaktifkan.", parse_mode='Markdown')
+    await query.edit_message_text(f"\u2705 Pengingat untuk bagian *{section}* telah diaktifkan.", parse_mode='Markdown')
 
 async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -182,15 +182,15 @@ async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 job.schedule_removal()
                 user_jobs[chat_id].remove(job)
 
-    context.bot_data["active_sections"][chat_id].pop(section, None)
-    await query.edit_message_text(f"❌ Pengingat untuk bagian *{section}* telah dihentikan.", parse_mode='Markdown')
+    context.chat_data.get("active_sections", {}).pop(section, None)
+    await query.edit_message_text(f"\u274c Pengingat untuk bagian *{section}* telah dihentikan.", parse_mode='Markdown')
 
 async def mark_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     _, section, msg = query.data.split("_", 2)
     chat_id = query.message.chat.id
 
-    completed_tasks = context.bot_data.setdefault("completed_tasks", {}).setdefault(chat_id, set())
+    completed_tasks = context.chat_data.setdefault("completed_tasks", set())
 
     if msg in completed_tasks:
         completed_tasks.remove(msg)
@@ -215,10 +215,10 @@ async def schedule_section_reminders(application, chat_id, section, thread_id=No
         user_jobs[chat_id].append(job)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logging.error("❗ Exception occurred:", exc_info=context.error)
+    logging.error("\u2757 Exception occurred:", exc_info=context.error)
     if isinstance(update, Update) and update.effective_chat:
         try:
-            await context.bot.send_message(update.effective_chat.id, text="⚠️ Terjadi kesalahan. Silakan coba lagi nanti.")
+            await context.bot.send_message(update.effective_chat.id, text="\u26a0\ufe0f Terjadi kesalahan. Silakan coba lagi nanti.")
         except Exception:
             pass
 
@@ -267,7 +267,7 @@ async def main():
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
     else:
-        logging.warning("⚠️ WEBHOOK_URL_BASE environment variable tidak diset, webhook tidak aktif!")
+        logging.warning("\u26a0\ufe0f WEBHOOK_URL_BASE environment variable tidak diset, webhook tidak aktif!")
 
     runner = web.AppRunner(app)
     await runner.setup()
