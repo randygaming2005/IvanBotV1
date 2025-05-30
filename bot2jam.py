@@ -259,10 +259,11 @@ async def main():
     if WEBHOOK_URL_BASE:
         # Webhook mode
         await application.bot.set_webhook(WEBHOOK_URL)
-        runner = web.AppRunner(application.bot.web_app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", "8443")))
-        await site.start()
+        runner = web.AppRunner(app)
+await runner.setup()
+port = int(os.environ.get("PORT", 8000))
+site = web.TCPSite(runner, "0.0.0.0", port)
+await site.start()
         print("Bot started in webhook mode")
         while True:
             await asyncio.sleep(3600)
