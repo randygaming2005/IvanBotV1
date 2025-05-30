@@ -155,8 +155,7 @@ async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([InlineKeyboardButton("❌ Reset", callback_data=f"reset_{section}")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    text = f"📋 Jadwal {section}:
-"
+    text = f"📋 Jadwal {section}:\n"
     await query.edit_message_text(text=text, reply_markup=reply_markup)
 
 async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -179,10 +178,11 @@ async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.message.chat.id
 
     if chat_id in user_jobs:
-        for job in user_jobs[chat_id]:
+        # gunakan salinan list supaya aman saat hapus job saat iterasi
+        for job in user_jobs[chat_id][:]:
             if job.data.get("section") == section:
                 job.schedule_removal()
-        user_jobs[chat_id] = [job for job in user_jobs[chat_id] if job.data.get("section") != section]
+                user_jobs[chat_id].remove(job)
 
     user_active_sections.get(chat_id, {}).pop(section, None)
     await query.edit_message_text(f"❌ Pengingat untuk bagian *{section}* telah dihentikan.", parse_mode='Markdown')
