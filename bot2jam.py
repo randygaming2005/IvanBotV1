@@ -26,10 +26,6 @@ WEBHOOK_URL = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}" if WEBHOOK_URL_BASE else None
 persistence = PicklePersistence(filepath="reminder_data.pkl")
 user_jobs = {}
 timezone = pytz.timezone("Asia/Jakarta")
-user_active_sections = {}
-
-# Menyimpan status tugas per user, section, dan tugas
-user_task_status = {}  # { chat_id: { section: { (h,m,msg): bool } } }
 
 REMINDER_SECTIONS = {
     "Pagi": [
@@ -119,19 +115,12 @@ async def reminder(context: ContextTypes.DEFAULT_TYPE):
     section = data["section"]
     thread_id = data.get("thread_id")
 
-    # Cek apakah tugas sudah diceklis (selesai)
-    status_dict = user_task_status.get(chat_id, {}).get(section, {})
-    key = None
-    for k in status_dict:
-        if k[2] == message:
-            key = k
-            break
-
-    if key and status_dict.get(key, False):
-        # Tugas sudah diceklis, jangan ingatkan
+    completed_tasks = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
+    if message in completed_tasks:
         return
 
-    if not user_active_sections.get(chat_id, {}).get(section):
+    active_sections = context.bot_data.get("active_sections", {}).get(chat_id, {})
+    if not active_sections.get(section):
         return
 
     await context.bot.send_message(
@@ -146,96 +135,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Siang", callback_data="section_Siang")],
         [InlineKeyboardButton("Malam", callback_data="section_Malam")],
     ]
-
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
 
 async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     section = query.data.split("_")[1]
     chat_id = query.message.chat.id
 
-    # Inisialisasi status tugas jika belum ada
-    if chat_id not in user_task_status:
-        user_task_status[chat_id] = {}
-    if section not in user_task_status[chat_id]:
-        user_task_status[chat_id][section] = {(h, m, msg): False for h, m, msg in REMINDER_SECTIONS[section]}
+    completed = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
 
-    keyboard = [
-        [InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")],
-    ]
-
+    keyboard = [[InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")]]
     for h, m, msg in REMINDER_SECTIONS[section]:
-        done = user_task_status[chat_id][section].get((h, m, msg), False)
-        icon = "✅" if done else "❌"
-        callback_data = f"toggle_{section}_{h}_{m}"
-        keyboard.append([InlineKeyboardButton(f"{icon} {h:02d}:{m:02d} - {msg}", callback_data=callback_data)])
+        status = "✅" if msg in completed else "❌"
+        keyboard.append([InlineKeyboardButton(f"{status} {h:02d}:{m:02d} - {msg}", callback_data=f"done_{section}_{msg}")])
 
     keyboard.append([InlineKeyboardButton("❌ Reset", callback_data=f"reset_{section}")])
-    keyboard.append([InlineKeyboardButton("⬅️ Kembali", callback_data="back_main")])
+    keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="go_back")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    text = f"📋 Jadwal {section}:\n"
-    await query.edit_message_text(text=text, reply_markup=reply_markup)
-
-async def toggle_task_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data.split("_")
-    section = data[1]
-    h = int(data[2])
-    m = int(data[3])
-    chat_id = query.message.chat.id
-
-    if chat_id not in user_task_status:
-        user_task_status[chat_id] = {}
-    if section not in user_task_status[chat_id]:
-        user_task_status[chat_id][section] = {(hh, mm, msg): False for hh, mm, msg in REMINDER_SECTIONS[section]}
-
-    task_key = None
-    for hh, mm, msg in REMINDER_SECTIONS[section]:
-        if hh == h and mm == m:
-            task_key = (hh, mm, msg)
-            break
-
-    if task_key is None:
-        return
-
-    current_status = user_task_status[chat_id][section].get(task_key, False)
-    user_task_status[chat_id][section][task_key] = not current_status
-
-    # Refresh tampilan
-    keyboard = [
-        [InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")],
-    ]
-    for hh, mm, msg in REMINDER_SECTIONS[section]:
-        done = user_task_status[chat_id][section].get((hh, mm, msg), False)
-        icon = "✅" if done else "❌"
-        callback_data = f"toggle_{section}_{hh}_{mm}"
-        keyboard.append([InlineKeyboardButton(f"{icon} {hh:02d}:{mm:02d} - {msg}", callback_data=callback_data)])
-
-    keyboard.append([InlineKeyboardButton("❌ Reset", callback_data=f"reset_{section}")])
-    keyboard.append([InlineKeyboardButton("⬅️ Kembali", callback_data="back_main")])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    text = f"📋 Jadwal {section}:\n"
-    await query.edit_message_text(text=text, reply_markup=reply_markup)
-
-async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    keyboard = [
-        [InlineKeyboardButton("Pagi", callback_data="section_Pagi")],
-        [InlineKeyboardButton("Siang", callback_data="section_Siang")],
-        [InlineKeyboardButton("Malam", callback_data="section_Malam")],
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text("🕒 Pilih bagian jadwal untuk dikendalikan:", reply_markup=reply_markup)
+    await query.edit_message_text(f"📋 Jadwal {section}:", reply_markup=reply_markup)
 
 async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -243,10 +163,7 @@ async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     section = query.data.split("_")[1]
     chat_id = query.message.chat.id
 
-    if chat_id not in user_active_sections:
-        user_active_sections[chat_id] = {}
-
-    user_active_sections[chat_id][section] = True
+    context.bot_data.setdefault("active_sections", {}).setdefault(chat_id, {})[section] = True
     await schedule_section_reminders(context.application, chat_id, section)
     await query.edit_message_text(f"✅ Pengingat untuk bagian *{section}* telah diaktifkan.", parse_mode='Markdown')
 
@@ -256,55 +173,111 @@ async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     section = query.data.split("_")[1]
     chat_id = query.message.chat.id
 
-    # Reset status checklist ke False
-    if chat_id in user_task_status and section in user_task_status[chat_id]:
-        for k in user_task_status[chat_id][section]:
-            user_task_status[chat_id][section][k] = False
+    if chat_id in user_jobs:
+        for job in user_jobs[chat_id][:]:
+            if job.data.get("section") == section:
+                job.schedule_removal()
+                user_jobs[chat_id].remove(job)
 
-    await query.edit_message_text(f"❌ Checklist untuk bagian *{section}* sudah direset.", parse_mode='Markdown')
+    context.bot_data["active_sections"][chat_id].pop(section, None)
+    await query.edit_message_text(f"❌ Pengingat untuk bagian *{section}* telah dihentikan.", parse_mode='Markdown')
 
-async def schedule_section_reminders(application, chat_id: int, section: str):
-    # Hapus job lama untuk user dan section ini
-    job_name_prefix = f"reminder_{chat_id}_{section}_"
-    existing_jobs = [job for job in application.job_queue.get_jobs_by_name(job_name_prefix)]
-    for job in existing_jobs:
-        job.schedule_removal()
+async def mark_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    _, section, msg = query.data.split("_", 2)
+    chat_id = query.message.chat.id
 
-    now = datetime.datetime.now(tz=timezone)
+    context.bot_data.setdefault("completed_tasks", {}).setdefault(chat_id, set())
+
+    if msg in context.bot_data["completed_tasks"][chat_id]:
+        context.bot_data["completed_tasks"][chat_id].remove(msg)
+    else:
+        context.bot_data["completed_tasks"][chat_id].add(msg)
+
+    await section_handler(update, context)
+
+async def go_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await start(query, context)
+
+async def schedule_section_reminders(application, chat_id, section, thread_id=None):
+    if chat_id not in user_jobs:
+        user_jobs[chat_id] = []
 
     for h, m, msg in REMINDER_SECTIONS[section]:
-        # Hitung waktu pengingat berikutnya
-        remind_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
-        if remind_time < now:
-            remind_time += datetime.timedelta(days=1)
-
-        delta = (remind_time - now).total_seconds()
-
-        job_name = f"{job_name_prefix}{h:02d}{m:02d}"
-
-        application.job_queue.run_once(
+        waktu = datetime.time(hour=h, minute=m, tzinfo=timezone)
+        job = application.job_queue.run_daily(
             reminder,
-            when=delta,
-            data={"chat_id": chat_id, "message": msg, "section": section},
-            name=job_name,
+            time=waktu,
+            chat_id=chat_id,
+            name=f"reminder_{chat_id}_{section}_{h:02d}{m:02d}",
+            data={"chat_id": chat_id, "message": msg, "section": section, "thread_id": thread_id}
         )
+        user_jobs[chat_id].append(job)
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Gunakan /start untuk memulai dan memilih jadwal yang ingin diaktifkan.")
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logging.error("❗ Exception occurred:", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_chat:
+        try:
+            await context.bot.send_message(update.effective_chat.id, text="⚠️ Terjadi kesalahan. Silakan coba lagi nanti.")
+        except Exception:
+            pass
 
-def main():
-    application = ApplicationBuilder().token(TOKEN).persistence(persistence).build()
+async def start_jobqueue(app):
+    await app.job_queue.start()
+
+async def handle_root(request):
+    return web.Response(text="Bot is running")
+
+async def handle_webhook(request):
+    application = request.app["application"]
+    update = await request.json()
+    from telegram import Update as TgUpdate
+    tg_update = TgUpdate.de_json(update, application.bot)
+    await application.update_queue.put(tg_update)
+    return web.Response()
+
+async def main():
+    application = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .persistence(persistence)
+        .post_init(start_jobqueue)
+        .build()
+    )
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CallbackQueryHandler(section_handler, pattern=r"^section_"))
-    application.add_handler(CallbackQueryHandler(toggle_task_status, pattern=r"^toggle_"))
-    application.add_handler(CallbackQueryHandler(back_to_main, pattern=r"^back_main$"))
-    application.add_handler(CallbackQueryHandler(activate_section, pattern=r"^activate_"))
-    application.add_handler(CallbackQueryHandler(reset_section, pattern=r"^reset_"))
+    application.add_handler(CallbackQueryHandler(section_handler, pattern="^section_"))
+    application.add_handler(CallbackQueryHandler(activate_section, pattern="^activate_"))
+    application.add_handler(CallbackQueryHandler(reset_section, pattern="^reset_"))
+    application.add_handler(CallbackQueryHandler(mark_done, pattern="^done_"))
+    application.add_handler(CallbackQueryHandler(go_back, pattern="^go_back$"))
+    application.add_error_handler(error_handler)
 
-    # Jika kamu ingin pakai polling
-    application.run_polling()
+    app = web.Application()
+    app["application"] = application
+    app.add_routes([
+        web.get("/", handle_root),
+        web.post(WEBHOOK_PATH, handle_webhook),
+    ])
+
+    if WEBHOOK_URL:
+        await application.bot.set_webhook(WEBHOOK_URL)
+    else:
+        logging.warning("⚠️ WEBHOOK_URL_BASE environment variable tidak diset, webhook tidak aktif!")
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    await application.initialize()
+    await application.start()
+
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
