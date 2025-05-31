@@ -2,6 +2,7 @@ import logging
 import datetime
 import pytz
 import os
+import re
 import asyncio
 
 from aiohttp import web
@@ -265,6 +266,8 @@ async def schedule_section_reminders(application: ApplicationBuilder, chat_id: i
     """
     Untuk setiap (jam, menit, pesan) di REMINDER_SECTIONS[section],
     hitung waktu pengingat 5 menit sebelum, konversi ke UTC, lalu run_daily.
+    Pastikan setiap job memiliki job_name yang unik agar tidak terjadi
+    collision jika ada dua reminder pada jam:menit yang sama.
     """
     job_queue = application.job_queue
 
@@ -287,11 +290,16 @@ async def schedule_section_reminders(application: ApplicationBuilder, chat_id: i
         # Konversi ke UTC
         reminder_utc_time = reminder_local.astimezone(pytz.utc).time()
 
-        job_name = f"reminder_{chat_id}_{section}_{hour:02d}{minute:02d}"
+        # Buat nama job yang unik dengan memasukkan message (sesudah disanitasi)
+        clean_msg = re.sub(r'\W+', '_', message)
+        job_name = f"reminder_{chat_id}_{section}_{hour:02d}{minute:02d}_{clean_msg}"
 
-        # Hapus job lama jika sudah ada
+        # Hapus job lama jika sudah ada (berdasarkan job_name)
         for old_job in job_queue.get_jobs_by_name(job_name):
-            old_job.schedule_removal()
+            try:
+                old_job.schedule_removal()
+            except JobLookupError:
+                pass
 
         # Jadwalkan job dengan fungsi 'reminder'
         job = job_queue.run_daily(
@@ -356,29 +364,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 # -------------------------------------------------
-# JobQueue dijalankan setelah bot dijalankan
-# -------------------------------------------------
-async def start_jobqueue(application):
-    await application.job_queue.start()
-
-# -------------------------------------------------
-# Handler untuk endpoint root (cek bot running)
-# -------------------------------------------------
-async def handle_root(request):
-    return web.Response(text="Bot is running")
-
-# -------------------------------------------------
-# Handler untuk webhook Telegram
-# -------------------------------------------------
-async def handle_webhook(request):
-    application = request.app["application"]
-    update = await request.json()
-    from telegram import Update as TgUpdate
-    tg_update = TgUpdate.de_json(update, application.bot)
-    await application.update_queue.put(tg_update)
-    return web.Response()
-
-# -------------------------------------------------
 # Tambahan command baru: /reset (reset semua reminder + data)
 # -------------------------------------------------
 async def reset_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -402,7 +387,7 @@ async def reset_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Semua tugas dan pengingat telah direset dan siap digunakan kembali.")
 
 # -------------------------------------------------
-# Fungsi pembantu untuk menampilkan daftar jadwal + status (✅/❌) per section (digunakan oleh /jadwlpagi, /jadwalsiang, /jadwalmalam)
+# Fungsi pembantu untuk menampilkan daftar jadwal + status (✅/❌) per section (digunakan oleh /jadwalpagi, /jadwalsiang, /jadwalmalam)
 # -------------------------------------------------
 def format_jadwal(chat_id, section, context):
     completed = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
@@ -428,7 +413,24 @@ async def jadwal_malam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="Markdown")
 
 # -------------------------------------------------
-# Fungsi main: membangun aplikasi, menambahkan handler, dan menjalankan webhook/server
+# Handler untuk endpoint root (cek bot running)
+# -------------------------------------------------
+async def handle_root(request):
+    return web.Response(text="Bot is running")
+
+# -------------------------------------------------
+# Handler untuk webhook Telegram
+# -------------------------------------------------
+async def handle_webhook(request):
+    application = request.app["application"]
+    update = await request.json()
+    from telegram import Update as TgUpdate
+    tg_update = TgUpdate.de_json(update, application.bot)
+    await application.update_queue.put(tg_update)
+    return web.Response()
+
+# -------------------------------------------------
+# Fungsi utama: membangun aplikasi, menambahkan handler, dan menjalankan webhook/server
 # -------------------------------------------------
 async def main():
     application = (
@@ -441,10 +443,10 @@ async def main():
     # Tambahkan handler perintah
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("reset", reset_all))
-    application.add_handler(CommandHandler("jadwlpagi", jadwal_pagi))
+    application.add_handler(CommandHandler("jadwalaktif", jadwal_aktif))
+    application.add_handler(CommandHandler("jadwalpagi", jadwal_pagi))
     application.add_handler(CommandHandler("jadwalsiang", jadwal_siang))
     application.add_handler(CommandHandler("jadwalmalam", jadwal_malam))
-    application.add_handler(CommandHandler("jadwalaktif", jadwal_aktif))
 
     # Tambahkan handler CallbackQuery (tombol interaktif)
     application.add_handler(CallbackQueryHandler(section_handler, pattern="^section_"))
@@ -460,7 +462,7 @@ async def main():
     await application.start()
 
     # Setelah bot Telegram berjalan, jalankan JobQueue
-    await start_jobqueue(application)
+    await application.job_queue.start()
 
     # Siapkan aiohttp untuk webhook (jika menggunakan metode webhook)
     app = web.Application()
