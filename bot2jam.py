@@ -263,13 +263,13 @@ async def schedule_section_reminders(application: ApplicationBuilder, chat_id: i
         now_local = datetime.datetime.now(timezone)
         target_local = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
-        # Jika waktu target sudah lewat hari ini, run_daily akan otomatis menjadwalkan besoknya
         # Kurangi 5 menit untuk pengingat
         reminder_local = target_local - datetime.timedelta(minutes=5)
 
-        # Jika jamnya bergeser ke hari sebelumnya (misalnya target jam 00:03), Python tetap handle replace -> 
-        # kita gunakan localize agar ada tzinfo-nya.
-        reminder_local = timezone.localize(reminder_local.replace(tzinfo=None)) if reminder_local.tzinfo is None else reminder_local
+        # Jika jamnya bergeser ke hari sebelumnya (misalnya target jam 00:03),
+        # kita lakukan localize agar ada tzinfo:
+        if reminder_local.tzinfo is None:
+            reminder_local = timezone.localize(reminder_local)
 
         # Konversi ke UTC
         reminder_utc_time = reminder_local.astimezone(pytz.utc).time()
@@ -294,6 +294,41 @@ async def schedule_section_reminders(application: ApplicationBuilder, chat_id: i
         )
 
         user_jobs[chat_id].append(job)
+
+# -------------------------------------------------
+# Handler untuk melihat daftar section yang aktif (/jadwalaktif)
+# -------------------------------------------------
+async def jadwal_aktif(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    active_dict = context.bot_data.get("active_sections", {}).get(chat_id, {})
+
+    # Cari section yang sedang aktif (value == True)
+    aktif_sections = [sec for sec, val in active_dict.items() if val]
+
+    if not aktif_sections:
+        # Jika tidak ada section aktif
+        await update.message.reply_text("ℹ️ Tidak ada jadwal yang sedang aktif.")
+        return
+
+    # Buat daftar teks section aktif
+    lines = ["📋 *Jadwal yang Aktif:*"]
+    for sec in aktif_sections:
+        lines.append(f"• {sec}")
+
+    # Buat tombol Reset untuk setiap section aktif
+    keyboard = []
+    for sec in aktif_sections:
+        keyboard.append([InlineKeyboardButton(f"🔄 Reset {sec}", callback_data=f"reset_{sec}")])
+
+    # Tambahkan tombol "🔙 Kembali" ke menu utama
+    keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="go_back")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
 
 # -------------------------------------------------
 # Handler untuk error (jika terjadi exception)
@@ -392,6 +427,7 @@ async def main():
     application.add_handler(CommandHandler("jadwlpagi", jadwal_pagi))
     application.add_handler(CommandHandler("jadwalsiang", jadwal_siang))
     application.add_handler(CommandHandler("jadwalmalam", jadwal_malam))
+    application.add_handler(CommandHandler("jadwalaktif", jadwal_aktif))  # <-- Baru
 
     # Tambahkan handler CallbackQuery (tombol interaktif)
     application.add_handler(CallbackQueryHandler(section_handler, pattern="^section_"))
