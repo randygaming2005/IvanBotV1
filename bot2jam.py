@@ -13,6 +13,7 @@ from telegram.ext import (
     ContextTypes,
     PicklePersistence,
 )
+from apscheduler.jobstores.base import JobLookupError  # Untuk menangani job yang sudah dihapus
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -207,7 +208,11 @@ async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for job in user_jobs[chat_id][:]:
             job_data = job.data or {}
             if job_data.get("section") == section:
-                job.schedule_removal()
+                try:
+                    job.schedule_removal()
+                except JobLookupError:
+                    # Job sudah terhapus dari scheduler, abaikan
+                    pass
                 user_jobs[chat_id].remove(job)
 
     # Nonaktifkan section
@@ -372,7 +377,10 @@ async def reset_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Hentikan semua job untuk user ini
     if chat_id in user_jobs:
         for job in user_jobs[chat_id]:
-            job.schedule_removal()
+            try:
+                job.schedule_removal()
+            except JobLookupError:
+                pass
         user_jobs[chat_id].clear()
 
     # Reset bot_data: active_sections & completed_tasks
@@ -427,7 +435,7 @@ async def main():
     application.add_handler(CommandHandler("jadwlpagi", jadwal_pagi))
     application.add_handler(CommandHandler("jadwalsiang", jadwal_siang))
     application.add_handler(CommandHandler("jadwalmalam", jadwal_malam))
-    application.add_handler(CommandHandler("jadwalaktif", jadwal_aktif))  # <-- Baru
+    application.add_handler(CommandHandler("jadwalaktif", jadwal_aktif))
 
     # Tambahkan handler CallbackQuery (tombol interaktif)
     application.add_handler(CallbackQueryHandler(section_handler, pattern="^section_"))
