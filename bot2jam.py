@@ -235,6 +235,48 @@ async def schedule_section_reminders(application, chat_id, section, thread_id=No
         )
         user_jobs[chat_id].append(job)
 
+async def reset_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    # Reset semua completed tasks
+    if "completed_tasks" in context.bot_data and chat_id in context.bot_data["completed_tasks"]:
+        context.bot_data["completed_tasks"][chat_id].clear()
+
+    # Reset semua active sections
+    if "active_sections" in context.bot_data and chat_id in context.bot_data["active_sections"]:
+        context.bot_data["active_sections"][chat_id].clear()
+
+    # Hentikan semua job yang terdaftar untuk user ini
+    if chat_id in user_jobs:
+        for job in user_jobs[chat_id]:
+            job.schedule_removal()
+        user_jobs[chat_id].clear()
+
+    await update.message.reply_text("🔄 Semua tugas telah direset dan siap digunakan kembali.")
+
+def format_schedule(chat_id, section, context):
+    completed = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
+    lines = [f"📋 Jadwal *{section}*:"]
+    for h, m, msg in REMINDER_SECTIONS[section]:
+        status = "✅" if msg in completed else "❌"
+        lines.append(f"{status} {h:02d}:{m:02d} - {msg}")
+    return "\n".join(lines)
+
+async def show_jadwal_pagi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    text = format_schedule(chat_id, "Pagi", context)
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def show_jadwal_siang(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    text = format_schedule(chat_id, "Siang", context)
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def show_jadwal_malam(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    text = format_schedule(chat_id, "Malam", context)
+    await update.message.reply_text(text, parse_mode="Markdown")
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logging.error("❗ Exception occurred:", exc_info=context.error)
     if isinstance(update, Update) and update.effective_chat:
@@ -267,36 +309,38 @@ async def main():
     )
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(section_handler, pattern="^section_"))
-    application.add_handler(CallbackQueryHandler(activate_section, pattern="^activate_"))
-    application.add_handler(CallbackQueryHandler(reset_section, pattern="^reset_"))
-    application.add_handler(CallbackQueryHandler(mark_done, pattern="^done_"))
-    application.add_handler(CallbackQueryHandler(go_back, pattern="^go_back$"))
+    application.add_handler(CallbackQueryHandler(section_handler, pattern=r"^section_"))
+    application.add_handler(CallbackQueryHandler(activate_section, pattern=r"^activate_"))
+    application.add_handler(CallbackQueryHandler(reset_section, pattern=r"^reset_"))
+    application.add_handler(CallbackQueryHandler(mark_done, pattern=r"^done_"))
+    application.add_handler(CallbackQueryHandler(go_back, pattern="go_back"))
+    application.add_handler(CommandHandler("reset", reset_all))
+    application.add_handler(CommandHandler("jadwlpagi", show_jadwal_pagi))
+    application.add_handler(CommandHandler("jadwalsiang", show_jadwal_siang))
+    application.add_handler(CommandHandler("jadwalmalam", show_jadwal_malam))
     application.add_error_handler(error_handler)
 
-    app = web.Application()
-    app["application"] = application
-    app.add_routes([
-        web.get("/", handle_root),
-        web.post(WEBHOOK_PATH, handle_webhook),
-    ])
-
     if WEBHOOK_URL:
+        app = web.Application()
+        app["application"] = application
+        app.router.add_post(WEBHOOK_PATH, handle_webhook)
+        app.router.add_get("/", handle_root)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", "8443")))
+        await site.start()
+
         await application.bot.set_webhook(WEBHOOK_URL)
+        print(f"Webhook running on {WEBHOOK_URL}")
+        # Keep running forever
+        while True:
+            await asyncio.sleep(3600)
     else:
-        logging.warning("⚠️ WEBHOOK_URL_BASE environment variable tidak diset, webhook tidak aktif!")
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 8000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-
-    await application.initialize()
-    await application.start()
-
-    while True:
-        await asyncio.sleep(3600)
+        # Long polling fallback
+        await application.run_polling()
 
 if __name__ == "__main__":
+    import asyncio
+
     asyncio.run(main())
