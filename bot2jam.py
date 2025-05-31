@@ -19,6 +19,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
+logger = logging.getLogger(__name__)
 
 TOKEN = os.environ.get("TOKEN") or "YOUR_BOT_TOKEN_HERE"
 WEBHOOK_PATH = f"/{TOKEN}"
@@ -195,7 +196,7 @@ async def activate_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # -------------------------------------------------
-# Handler untuk mereset section (menghapus semua job & menonaktifkan)
+# Handler untuk mereset section (menghapus semua job, menonaktifkan, dan menghapus tanda ✅)
 # -------------------------------------------------
 async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -219,10 +220,14 @@ async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "active_sections" in context.bot_data and chat_id in context.bot_data["active_sections"]:
         context.bot_data["active_sections"][chat_id].pop(section, None)
 
-    await query.edit_message_text(
-        f"❌ Pengingat untuk bagian *{section}* telah dihentikan.",
-        parse_mode='Markdown'
-    )
+    # Hapus semua tanda ✅ untuk pesan di section ini
+    completed = context.bot_data.setdefault("completed_tasks", {}).setdefault(chat_id, set())
+    # Untuk setiap pesan di REMINDER_SECTIONS[section], hapus dari completed_tasks jika ada
+    for _, _, msg in REMINDER_SECTIONS[section]:
+        completed.discard(msg)
+
+    # Tampilkan ulang daftar jadwal; semua status kembali ke ❌
+    await section_handler(update, context)
 
 # -------------------------------------------------
 # Handler untuk menandai sebuah pesan sudah selesai (done/tidak done)
