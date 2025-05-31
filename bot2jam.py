@@ -173,13 +173,17 @@ async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     section = query.data.split("_")[1]
     chat_id = query.message.chat.id
 
+    # Hentikan semua job terkait section
     if chat_id in user_jobs:
         for job in user_jobs[chat_id][:]:
             if job.data.get("section") == section:
                 job.schedule_removal()
                 user_jobs[chat_id].remove(job)
 
-    context.bot_data["active_sections"][chat_id].pop(section, None)
+    # Cek dan inisialisasi key 'active_sections' dan chat_id
+    if "active_sections" in context.bot_data and chat_id in context.bot_data["active_sections"]:
+        context.bot_data["active_sections"][chat_id].pop(section, None)
+
     await query.edit_message_text(f"❌ Pengingat untuk bagian *{section}* telah dihentikan.", parse_mode='Markdown')
 
 async def mark_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
