@@ -207,12 +207,27 @@ async def schedule_section_reminders(application, chat_id, section, thread_id=No
 
     for h, m, msg in REMINDER_SECTIONS[section]:
         waktu = datetime.time(hour=h, minute=m, tzinfo=timezone)
+
+        # Hitung waktu 5 menit sebelumnya
+        scheduled_datetime = datetime.datetime.combine(datetime.date.today(), waktu)
+        early_datetime = scheduled_datetime - datetime.timedelta(minutes=5)
+        early_time = early_datetime.time()
+
+        # Format waktu asli (HH:MM)
+        waktu_str = f"{h:02d}:{m:02d}"
+
+        # Jadwalkan hanya pengingat 5 menit sebelumnya
         job = application.job_queue.run_daily(
             reminder,
-            time=waktu,
+            time=early_time,
             chat_id=chat_id,
-            name=f"reminder_{chat_id}_{section}_{h:02d}{m:02d}",
-            data={"chat_id": chat_id, "message": msg, "section": section, "thread_id": thread_id}
+            name=f"reminder_early_{chat_id}_{section}_{h:02d}{m:02d}",
+            data={
+                "chat_id": chat_id,
+                "message": f"⏳ *{waktu_str}* — 5 menit lagi: {msg}",
+                "section": section,
+                "thread_id": thread_id
+            }
         )
         user_jobs[chat_id].append(job)
 
