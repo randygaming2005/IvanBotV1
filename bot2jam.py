@@ -164,16 +164,20 @@ async def section_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     completed = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
 
-    keyboard = [[InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")]]
+    # Membangun teks beserta inline keyboard untuk satu section
+    lines = [f"📋 Jadwal *{section}*:"]
+    keyboard = [
+        [InlineKeyboardButton("✅ Aktifkan", callback_data=f"activate_{section}")]
+    ]
     for h, m, msg in REMINDER_SECTIONS[section]:
         status = "✅" if msg in completed else "❌"
+        lines.append(f"{status} {h:02d}:{m:02d} - {msg}")
         keyboard.append([InlineKeyboardButton(f"{status} {h:02d}:{m:02d} - {msg}", callback_data=f"done_{section}_{msg}")])
-
     keyboard.append([InlineKeyboardButton("❌ Reset", callback_data=f"reset_{section}")])
     keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="go_back")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"📋 Jadwal {section}:", reply_markup=reply_markup)
+    await query.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=reply_markup)
 
 # -------------------------------------------------
 # Handler untuk mengaktifkan section (menjadwalkan reminder)
@@ -222,7 +226,6 @@ async def reset_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Hapus semua tanda ✅ untuk pesan di section ini
     completed = context.bot_data.setdefault("completed_tasks", {}).setdefault(chat_id, set())
-    # Untuk setiap pesan di REMINDER_SECTIONS[section], hapus dari completed_tasks jika ada
     for _, _, msg in REMINDER_SECTIONS[section]:
         completed.discard(msg)
 
@@ -306,7 +309,7 @@ async def schedule_section_reminders(application: ApplicationBuilder, chat_id: i
         user_jobs[chat_id].append(job)
 
 # -------------------------------------------------
-# Handler untuk melihat daftar section yang aktif (/jadwalaktif)
+# Handler untuk melihat daftar section yang aktif beserta isi jadwalnya (/jadwalaktif)
 # -------------------------------------------------
 async def jadwal_aktif(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -320,25 +323,26 @@ async def jadwal_aktif(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ℹ️ Tidak ada jadwal yang sedang aktif.")
         return
 
-    # Buat daftar teks section aktif
-    lines = ["📋 *Jadwal yang Aktif:*"]
-    for sec in aktif_sections:
-        lines.append(f"• {sec}")
+    # Untuk setiap section aktif, kirim satu pesan dengan detail jadwal dan tombol interaktif
+    for section in aktif_sections:
+        completed = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
 
-    # Buat tombol Reset untuk setiap section aktif
-    keyboard = []
-    for sec in aktif_sections:
-        keyboard.append([InlineKeyboardButton(f"🔄 Reset {sec}", callback_data=f"reset_{sec}")])
+        # Bangun header teks
+        lines = [f"📋 Jadwal *{section}* (Aktif):"]
+        keyboard = []
+        for h, m, msg in REMINDER_SECTIONS[section]:
+            status = "✅" if msg in completed else "❌"
+            lines.append(f"{status} {h:02d}:{m:02d} - {msg}")
+            # Tombol untuk toggle done/undone
+            keyboard.append([InlineKeyboardButton(f"{status} {h:02d}:{m:02d} - {msg}", callback_data=f"done_{section}_{msg}")])
 
-    # Tambahkan tombol "🔙 Kembali" ke menu utama
-    keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="go_back")])
+        # Tambahkan tombol Reset pada bagian bawah
+        keyboard.append([InlineKeyboardButton(f"❌ Reset {section}", callback_data=f"reset_{section}")])
+        # Tombol kembali ke menu utama
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="go_back")])
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "\n".join(lines),
-        parse_mode="Markdown",
-        reply_markup=reply_markup
-    )
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=reply_markup)
 
 # -------------------------------------------------
 # Handler untuk error (jika terjadi exception)
@@ -398,7 +402,7 @@ async def reset_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Semua tugas dan pengingat telah direset dan siap digunakan kembali.")
 
 # -------------------------------------------------
-# Fungsi pembantu untuk menampilkan daftar jadwal + status (✅/❌)
+# Fungsi pembantu untuk menampilkan daftar jadwal + status (✅/❌) per section (digunakan oleh /jadwlpagi, /jadwalsiang, /jadwalmalam)
 # -------------------------------------------------
 def format_jadwal(chat_id, section, context):
     completed = context.bot_data.get("completed_tasks", {}).get(chat_id, set())
